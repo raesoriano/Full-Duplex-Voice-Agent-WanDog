@@ -43,7 +43,10 @@ mic ──▶ VAD (Silero ONNX) ──▶ LLM (OnIt, OpenAI-compatible) ──�
 - **Local TTS** — Piper on CPU, no cloud, ~24 kHz output.
 - **Config-driven** — model, base URL, voice, VAD thresholds, sample rates all
   in `config.py` / env.
-- **Key-safe** — LLM key from `ONIT_LLM_API_KEY` → OS keychain → `OPENAI_API_KEY`.
+- **Key-safe** — LLM key resolved the same way OnIt does: `ONIT_LLM_API_KEY`
+  env → OS keychain (`onit` / `endpoint_key:<base_url>`, then legacy
+  `vllm_api_key`) → `~/.onit/secrets.yaml` → `OPENAI_API_KEY`. A key stored
+  once via `onit setup` is picked up with **no manual export**.
 
 ## 4. Issues & challenges faced
 
@@ -80,10 +83,15 @@ real sound card. Harmless — on the Pi the USB capture card + speaker are the
 real devices. (Sandbox has only a null/loopback device, so a live mic test can't
 be done here.)
 
-### No keyring backend in the venv
-`keyring` reports "No recommended backend was available" in this environment,
-so keychain lookup fails gracefully and the agent falls back to env vars. On the
-Pi (with a keyring backend) the keychain path works.
+### Keyring needs the D-Bus session address in a headless process
+`keyring`'s SecretService backend can't reach the `gnome-keyring-daemon`
+without `DBUS_SESSION_BUS_ADDRESS`, even when the daemon and its socket
+(`/run/user/1000/bus`) are both present. `config.py:_ensure_dbus_session()`
+exports it from `XDG_RUNTIME_DIR` before importing `keyring`. Verified: a
+clean shell (no key env vars, no D-Bus address) resolves the 64-char key from
+the keychain with no manual export. (Earlier note that the keychain was
+"unreachable in this sandbox" is stale — it was just missing the D-Bus
+address.)
 
 ## 5. How to run
 ```bash
@@ -104,6 +112,8 @@ Stop with **Ctrl+C**.
 ## 7. Open questions / next steps
 - [ ] **Live mic test on the Pi** — confirm capture card at 48 kHz, speaker out,
       and barge-in feel. (Can't be done in this sandbox — no real audio device.)
+      No `export` needed: run `onit setup` once to store the key, then just
+      `.venv/bin/python agent.py`.
 - [ ] Confirm the OnIt endpoint accepts **raw audio input** on the model we use;
       if it's text-only, add an ASR stage (faster-whisper / sherpa-onnx, already
       in requirements) between VAD and LLM.
