@@ -10,23 +10,30 @@
 #   libasound2-dev the build is OSS-only and sees 0 audio devices).
 #
 # NOTE on reuse: this Pi already has a working venv (see ENVIRONMENT.md) with
-# all the heavy artifacts (CPU torch, faster-whisper, sherpa-onnx, silero-vad,
-# Piper TTS, the Zipformer ASR model). Point the agent at those rather than
-# re-downloading ~2.3 GB. The venv used here is the v3 venv, into which
-# pipecat-ai is installed.
+# the heavy artifacts (faster-whisper, sherpa-onnx, Piper TTS, the Zipformer
+# ASR model). Point the agent at those rather than re-downloading ~2.3 GB.
 #
 # NOTE on the mic: the USB capture card only accepts 48 kHz for capture
 # (16/8/32 kHz fail). The agent captures at 48 kHz and resamples to 16 kHz
 # for VAD/ASR. See config.py / audio_io.py.
+#
+# --- NO TORCH in this project ---
+# torch is deliberately NOT installed. It is heavy (~1.5-2 GB) and was only
+# ever pulled in by the Silero VAD path (silero-vad hard-requires torch>=1.12).
+# We use webrtcvad instead, which has zero dependencies. If you later want the
+# higher-quality Silero VAD, add back `silero-vad` (and the pipecat `silero`
+# extra) and install CPU torch from the CPU index:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 # --- Core agent harness (Pipecat) + the extras we use ---
 # pipecat-ai[mcp]     : MCP support (the agent talks to its own MCP servers)
-# pipecat-ai[webrtc]  : silero-vad (voice activity detection)
+# pipecat-ai[webrtc]  : WebRTC audio transport (aiortc)
 # pipecat-ai[piper]   : Piper TTS (local, low latency)
 # pipecat-ai[openai]  : OpenAI-compatible LLM client
 # pipecat-ai[whisper] : faster-whisper (local ASR)
-# pipecat-ai[silero]  : silero-vad
-pipecat-ai[mcp,webrtc,piper,openai,whisper,silero]
+# NOTE: the `silero` extra is intentionally omitted -- it would pull in
+#       silero-vad -> torch. VAD is handled by webrtcvad below.
+pipecat-ai[mcp,webrtc,piper,openai,whisper]
 
 # --- MCP framework (the ASR + TTS MCP servers are built on FastMCP) ---
 mcp>=2.0.0
@@ -36,8 +43,9 @@ fastmcp>=2.0.0
 faster-whisper>=1.0.0
 sherpa-onnx>=1.10.0          # default ASR backend (fastest on the Pi)
 
-# --- VAD ---
-silero-vad>=5.0.0            # Silero VAD (weights cached in torch.hub)
+# --- VAD (torch-free) ---
+webrtcvad>=2.0.10            # primary VAD -- zero dependencies, no torch
+setuptools<81                # for pkg_resources (webrtcvad build)
 
 # --- LLM (OpenAI-compatible + native Ollama endpoints) ---
 openai>=1.74.0               # deep model (OnIt endpoint at 202.92.159.240:8001)
@@ -47,8 +55,6 @@ keyring>=25.0.0              # read OnIt's endpoint keys from the OS keychain
 # --- Audio I/O ---
 PyAudio>=0.2.14              # mic + speaker (needs portaudio19-dev, libasound2-dev)
 pywebrtc-audio>=0.2.0        # WebRTC AECM (echo cancellation -- the working backend)
-webrtcvad>=2.0.10            # (optional) secondary VAD
-setuptools<81                # for pkg_resources (webrtcvad build)
 
 # --- Resampling / numerics ---
 numpy>=1.26
@@ -74,11 +80,4 @@ soundfile>=0.12.0            # decode downloaded audio to float32 mono
 
 # --- Config / secrets ---
 pyyaml>=6.0
-keyring>=25.0                # read OnIt's LLM API keys from the OS keychain
-
-# --- CPU-only torch (aarch64, no GPU). Install from the CPU index so pip
-#     does NOT pull the CUDA build + nvidia_* + triton (~1.5-2 GB wasted on a
-#     no-GPU Pi):
-#     pip install torch --index-url https://download.pytorch.org/whl/cpu
-# torch is already present in the reused venv; listed here for completeness.
-# torch>=2.0.0
+# keyring is listed once under LLM above (>=25.0.0) -- do not duplicate.
