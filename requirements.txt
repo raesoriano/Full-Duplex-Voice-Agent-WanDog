@@ -1,0 +1,84 @@
+# Full-Duplex Voice AI Agent (v4) -- dependencies
+#
+# Platform: Raspberry Pi 5 8GB, aarch64 (ARM64), no GPU, Python 3.12.
+#
+# System packages (install with sudo -- NOT in this file):
+#   sudo apt-get install -y python3-venv portaudio19-dev libasound2-dev
+#
+#   portaudio19-dev + libasound2-dev are needed so PyAudio's bundled
+#   PortAudio links the ALSA backend (modern RPi OS is ALSA-only; without
+#   libasound2-dev the build is OSS-only and sees 0 audio devices).
+#
+# NOTE on reuse: this Pi already has a working venv (see ENVIRONMENT.md) with
+# all the heavy artifacts (CPU torch, faster-whisper, sherpa-onnx, silero-vad,
+# Piper TTS, the Zipformer ASR model). Point the agent at those rather than
+# re-downloading ~2.3 GB. The venv used here is the v3 venv, into which
+# pipecat-ai is installed.
+#
+# NOTE on the mic: the USB capture card only accepts 48 kHz for capture
+# (16/8/32 kHz fail). The agent captures at 48 kHz and resamples to 16 kHz
+# for VAD/ASR. See config.py / audio_io.py.
+
+# --- Core agent harness (Pipecat) + the extras we use ---
+# pipecat-ai[mcp]     : MCP support (the agent talks to its own MCP servers)
+# pipecat-ai[webrtc]  : silero-vad (voice activity detection)
+# pipecat-ai[piper]   : Piper TTS (local, low latency)
+# pipecat-ai[openai]  : OpenAI-compatible LLM client
+# pipecat-ai[whisper] : faster-whisper (local ASR)
+# pipecat-ai[silero]  : silero-vad
+pipecat-ai[mcp,webrtc,piper,openai,whisper,silero]
+
+# --- MCP framework (the ASR + TTS MCP servers are built on FastMCP) ---
+mcp>=2.0.0
+fastmcp>=2.0.0
+
+# --- ASR (local, no API key) ---
+faster-whisper>=1.0.0
+sherpa-onnx>=1.10.0          # default ASR backend (fastest on the Pi)
+
+# --- VAD ---
+silero-vad>=5.0.0            # Silero VAD (weights cached in torch.hub)
+
+# --- LLM (OpenAI-compatible + native Ollama endpoints) ---
+openai>=1.74.0               # deep model (OnIt endpoint at 202.92.159.240:8001)
+ollama>=0.6.0                # live model (gemma4:31b-cloud on api.ollama.com, Ollama-native)
+keyring>=25.0.0              # read OnIt's endpoint keys from the OS keychain
+
+# --- Audio I/O ---
+PyAudio>=0.2.14              # mic + speaker (needs portaudio19-dev, libasound2-dev)
+pywebrtc-audio>=0.2.0        # WebRTC AECM (echo cancellation -- the working backend)
+webrtcvad>=2.0.10            # (optional) secondary VAD
+setuptools<81                # for pkg_resources (webrtcvad build)
+
+# --- Resampling / numerics ---
+numpy>=1.26
+soxr>=1.0.0                  # high-quality resampling
+
+# --- Telemetry / dashboard ---
+pandas>=2.0.0
+streamlit>=1.30.0
+
+# --- Real-world task tools ---
+aiohttp>=3.9.0               # weather (Open-Meteo)
+ddgs>=9.0.0                  # web search (DuckDuckGo, no API key)
+
+# --- Smart-home dashboard (the agent controls this via MCP + REST) ---
+# dashboard_server.py is a FastAPI app (browser UI + SSE + REST control).
+fastapi>=0.110.0             # dashboard HTTP API
+uvicorn>=0.29.0              # ASGI server (already present via pipecat)
+sse-starlette>=2.0.0         # SSE stream to the browser (already present)
+httpx>=0.27.0                # REST client (MCP server + agent tools)
+# Music: the agent downloads YouTube audio and plays it through the speaker.
+yt-dlp>=2024.4.9             # YouTube audio download (module; ffmpeg is on PATH)
+soundfile>=0.12.0            # decode downloaded audio to float32 mono
+
+# --- Config / secrets ---
+pyyaml>=6.0
+keyring>=25.0                # read OnIt's LLM API keys from the OS keychain
+
+# --- CPU-only torch (aarch64, no GPU). Install from the CPU index so pip
+#     does NOT pull the CUDA build + nvidia_* + triton (~1.5-2 GB wasted on a
+#     no-GPU Pi):
+#     pip install torch --index-url https://download.pytorch.org/whl/cpu
+# torch is already present in the reused venv; listed here for completeness.
+# torch>=2.0.0
