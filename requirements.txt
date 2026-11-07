@@ -18,12 +18,11 @@
 # for VAD/ASR. See config.py / audio_io.py.
 #
 # --- NO TORCH in this project ---
-# torch is deliberately NOT installed. It is heavy (~1.5-2 GB) and was only
-# ever pulled in by the Silero VAD path (silero-vad hard-requires torch>=1.12).
-# We use webrtcvad instead, which has zero dependencies. If you later want the
-# higher-quality Silero VAD, add back `silero-vad` (and the pipecat `silero`
-# extra) and install CPU torch from the CPU index:
-#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# torch is deliberately NOT installed. It is heavy (~1.5-2 GB) and is NOT
+# needed for VAD: Pipecat's SileroVADAnalyzer loads the Silero ONNX model
+# through onnxruntime (CPUExecutionProvider), not torch. (The `silero-vad`
+# PyPI package is a separate TorchAudio wrapper that Pipecat does not use.)
+# So we get Silero VAD with zero torch cost -- just `onnxruntime` below.
 
 # --- Core agent harness (Pipecat) + the extras we use ---
 # pipecat-ai[mcp]     : MCP support (the agent talks to its own MCP servers)
@@ -31,8 +30,10 @@
 # pipecat-ai[piper]   : Piper TTS (local, low latency)
 # pipecat-ai[openai]  : OpenAI-compatible LLM client
 # pipecat-ai[whisper] : faster-whisper (local ASR)
-# NOTE: the `silero` extra is intentionally omitted -- it would pull in
-#       silero-vad -> torch. VAD is handled by webrtcvad below.
+# NOTE: the `silero` extra is intentionally omitted -- it installs the
+#       `silero-vad` TorchAudio wrapper (hard-requires torch). Pipecat's own
+#       SileroVADAnalyzer uses onnxruntime instead, so we add onnxruntime
+#       directly below and keep torch out of the dependency graph.
 pipecat-ai[mcp,webrtc,piper,openai,whisper]
 
 # --- MCP framework (the ASR + TTS MCP servers are built on FastMCP) ---
@@ -44,7 +45,9 @@ faster-whisper>=1.0.0
 sherpa-onnx>=1.10.0          # default ASR backend (fastest on the Pi)
 
 # --- VAD (torch-free) ---
-webrtcvad>=2.0.10            # primary VAD -- zero dependencies, no torch
+onnxruntime>=1.17.0          # primary VAD -- SileroVADAnalyzer runs the Silero
+                             # ONNX model on CPU via onnxruntime (no torch)
+webrtcvad>=2.0.10            # lightweight fallback VAD -- zero dependencies
 setuptools<81                # for pkg_resources (webrtcvad build)
 
 # --- LLM (OpenAI-compatible + native Ollama endpoints) ---
