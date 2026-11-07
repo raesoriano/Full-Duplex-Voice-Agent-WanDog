@@ -3,10 +3,16 @@
 All knobs for the voice agent live here. Values can be overridden with
 environment variables so the same code runs on the Pi and on a dev box.
 
-LLM key resolution order (first hit wins):
+LLM key resolution order (first hit wins) -- mirrors how OnIt itself
+resolves endpoint keys, so a key stored once by `onit setup` is picked up
+by Fweddie with no manual export:
   1. ONIT_LLM_API_KEY env var
-  2. OS keychain via `keyring` (service "onit", user "onit")
-  3. OPENAI_API_KEY env var (last resort)
+  2. OS keychain via `keyring` (service "onit", user
+     "endpoint_key:<base_url>" -- the exact key OnIt writes)
+  3. OS keychain legacy key "vllm_api_key" (OnIt's fallback for
+     non-provider hosts)
+  4. ~/.onit/secrets.yaml (OnIt's file fallback when no keychain)
+  5. OPENAI_API_KEY env var (last resort)
 
 If none is found the agent refuses to start with a clear message.
 """
@@ -14,6 +20,7 @@ If none is found the agent refuses to start with a clear message.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -61,26 +68,81 @@ SYSTEM_PROMPT = (
 )
 
 
+def _ensure_dbus_session() -> None:
+    """Point `keyring` at the running D-Bus session bus if the address is
+    missing. In a headless / sandboxed process the SecretService backend
+    cannot reach the gnome-keyring daemon without it, even when the daemon
+    and its socket are both present. No-op when the address is already set
+    (e.g. a normal desktop login)."""
+    if os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
+        return
+    xdg = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    bus = Path(xdg) / "bus"
+    if bus.exists():
+        os.environ.setdefault("XDG_RUNTIME_DIR", xdg)
+        os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path={bus}")
+
+
+def _key_from_keyring(user: str) -> str | None:
+    try:
+        import keyring
+
+        return keyring.get_password("onit", user)
+    except Exception:
+        return None  # no usable keyring backend
+
+
+def _key_from_secrets_yaml() -> str | None:
+    """Read OnIt's file fallback (~/.onit/secrets.yaml). OnIt writes the
+    key under 'endpoint_key:<url>' (or the legacy 'vllm_api_key') when no
+    keychain is available, so we look for the same keys."""
+    path = Path.home() / ".onit" / "secrets.yaml"
+    if not path.exists():
+        return None
+    try:
+        import yaml
+
+        data = yaml.safe_load(path.read_text()) or {}
+    except Exception:
+        return None
+    url = LLM_BASE_URL.rstrip("/")
+    for candidate in (f"endpoint_key:{url}", "vllm_api_key"):
+        val = data.get(candidate)
+        if val:
+            return str(val)
+    return None
+
+
 def resolve_llm_api_key() -> str:
-    """Return the LLM API key or raise with a clear message."""
+    """Return the LLM API key or raise with a clear message.
+
+    Resolution mirrors OnIt's own order (see module docstring) so a key
+    stored once via `onit setup` is shared with Fweddie.
+    """
+    # 1. Explicit env var.
     key = os.environ.get("ONIT_LLM_API_KEY")
     if key:
         return key
 
-    try:
-        import keyring
-
-        key = keyring.get_password("onit", "onit")
+    # 2-3. OS keychain -- the exact keys OnIt writes for this endpoint.
+    _ensure_dbus_session()
+    url = LLM_BASE_URL.rstrip("/")
+    for user in (f"endpoint_key:{url}", "vllm_api_key"):
+        key = _key_from_keyring(user)
         if key:
             return key
-    except Exception:
-        pass  # no usable keyring backend -- fall through
 
+    # 4. OnIt's file fallback.
+    key = _key_from_secrets_yaml()
+    if key:
+        return key
+
+    # 5. Last resort.
     key = os.environ.get("OPENAI_API_KEY")
     if key:
         return key
 
     raise SystemExit(
-        "No LLM API key found. Set ONIT_LLM_API_KEY, store one in the OS "
-        'keychain (service "onit", user "onit"), or set OPENAI_API_KEY.'
+        "No LLM API key found. Run `onit setup` to store one, set "
+        "ONIT_LLM_API_KEY, or set OPENAI_API_KEY."
     )
