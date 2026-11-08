@@ -152,16 +152,70 @@ Verified end-to-end against the real OnIt server:
 `test_guard.py` covers the Guard's logic (allow-through, redeem once/session,
 refuse + remember, prose passthrough) with a stubbed tool call.
 
-## 8. Open questions / next steps
-- [ ] **Live mic test on the Pi** — confirm capture card at 48 kHz, speaker out,
-      and barge-in feel. (Can't be done in this sandbox — no real audio device.)
+## 8. ASR (local, faster-whisper)
+
+The agent now runs a real ASR stage instead of feeding raw audio to the LLM:
+
+    mic(48k) -> VAD(Silero) -> ASR(faster-whisper small, 16k) -> LLM(text) -> TTS -> speaker
+
+- `WhisperSTTService` (Pipecat) with the `small` model, `int8` compute, `en`.
+  The model is already cached under `~/.cache/huggingface`, so **no download and
+  no API key**.
+- The mic captures at **16 kHz** when ASR is on (faster-whisper wants 16k), not
+  the 48 kHz the capture card natively produces. Output stays at the TTS rate.
+- Knobs in `config.py`: `FWEDDIE_ASR` (on/off), `FWEDDIE_ASR_MODEL`,
+  `FWEDDIE_ASR_DEVICE`, `FWEDDIE_ASR_COMPUTE`, `FWEDDIE_ASR_LANGUAGE`.
+  `FWEDDIE_ASR=0` restores the original raw-audio-to-LLM path.
+- The ASR stage emits `TranscriptionFrame`; the LLM streams its reply as
+  `LLMTextFrame` chunks. `FweddieLogger` buffers the reply and emits one
+  `bot_text` event per turn (see section 9).
+
+## 9. Dashboard (Streamlit, LAN-reachable)
+
+`dashboard.py` is a separate Streamlit process that shows the live interaction
+from any device on the LAN: a running transcript (your words + Fweddie's
+replies), the OnIt tools the agent calls and their results, and a live
+**approval panel** where you approve/deny a pending command with a button.
+
+The two processes coordinate through **plain files** (no version-specific
+Streamlit/Flask API, so it is robust):
+
+| File | Writer | Reader | Purpose |
+|---|---|---|---|
+| `/tmp/fweddie_events.jsonl` | agent | dashboard | the interaction record (one JSON per line) |
+| `/tmp/fweddie_events.jsonl.pending.json` | agent | dashboard | a command awaiting approval |
+| `/tmp/fweddie_events.jsonl.decision.json` | dashboard | agent | the person's decision (once/session/deny) |
+
+- The agent appends events via `eventbus.EventBus` (best-effort; a full disk
+  never crashes the voice loop). Events: `session_start/end`, `user_text`,
+  `bot_text`, `tool_call`, `tool_result`, `approval_requested/granted/denied`.
+- **Live approval:** when a command needs approval, the Guard writes the
+  pending file and polls for the decision file. The dashboard shows the command
+  and, on button click, writes the decision. If the dashboard is never up, the
+  Guard falls back to the **console** prompt, so approvals never block on the
+  browser. (Fail-closed: no decision by the timeout = deny.)
+- Turn it on with `FWEDDIE_DASHBOARD=1` (off by default). The agent writes the
+  event log regardless, so a dashboard started later still shows the session.
+
+Run the dashboard (from the repo, in the venv):
+
+    .venv/bin/python -m streamlit run dashboard.py \
+        --server.address 0.0.0.0 --server.port 8501
+
+Then open `http://<host-ip>:8501` from another device on the LAN.
+
+Tests: `test_eventbus.py` covers emit + dashboard read, half-written-line
+tolerance, the approval handshake (dashboard -> agent), and the console
+fallback when the dashboard is off.
+
+## 10. Open questions / next steps
+- [ ] **Live mic test on the Pi** — confirm capture card, speaker out, and
+      barge-in feel. (Can't be done in this sandbox — no real audio device.)
       No `export` needed: run `onit setup` once to store the key, then just
       `.venv/bin/python agent.py`.
-- [ ] Confirm the OnIt endpoint accepts **raw audio input** on the model we use;
-      if it's text-only, add an ASR stage (faster-whisper / sherpa-onnx, already
-      in requirements) between VAD and LLM.
-- [ ] Add the rest of the pipeline: **ASR**, **dashboard**, **music**.
-      (MCP tools are in -- see section 7; OnIt's tools + safeguards are wired
-      through the MCP bridge.)
+- [ ] Add **music** (YouTube download + playback) as an OnIt tool.
 - [ ] Tune VAD thresholds (`confidence`, `stop_secs`) and TTS volume for the room.
 - [ ] Decide on a wake word / "always listening" policy.
+- [ ] (Optional) Voice the approval prompt: have Fweddie *say* "I need approval
+      to run X" and take the answer by ASR, instead of the dashboard button /
+      console. The Guard's `prompt` is a pluggable callback, so it's a drop-in.

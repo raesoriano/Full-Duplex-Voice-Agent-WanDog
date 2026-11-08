@@ -42,6 +42,20 @@ INPUT_DEVICE_INDEX = os.environ.get("FWEDDIE_IN_DEVICE")
 OUTPUT_DEVICE_INDEX = os.environ.get("FWEDDIE_OUT_DEVICE")
 
 # ---------------------------------------------------------------------------
+# ASR (faster-whisper, local -- no API key)
+# ---------------------------------------------------------------------------
+# The agent used to feed raw audio straight to the LLM. It now runs a local
+# ASR stage (faster-whisper) so the LLM consumes TEXT. The `small` model is
+# already cached under ~/.cache/huggingface, so no download is needed.
+ASR_ENABLED = os.environ.get("FWEDDIE_ASR", "1") != "0"
+ASR_MODEL = os.environ.get("FWEDDIE_ASR_MODEL", "small")
+ASR_DEVICE = os.environ.get("FWEDDIE_ASR_DEVICE", "auto")   # auto|cpu|cuda
+ASR_COMPUTE = os.environ.get("FWEDDIE_ASR_COMPUTE", "int8")  # int8 is fast on the Pi
+ASR_LANGUAGE = os.environ.get("FWEDDIE_ASR_LANGUAGE", "en")
+# Resample the 48 kHz capture to 16 kHz for ASR (faster-whisper wants 16k).
+ASR_SAMPLE_RATE = 16000
+
+# ---------------------------------------------------------------------------
 # VAD (Silero ONNX via onnxruntime -- no torch)
 # ---------------------------------------------------------------------------
 VAD_CONFIDENCE = float(os.environ.get("FWEDDIE_VAD_CONFIDENCE", 0.7))
@@ -99,6 +113,23 @@ MCP_TOOL_TIMEOUT = float(os.environ.get("FWEDDIE_MCP_TOOL_TIMEOUT", 320))
 # it as a refusal (fail-closed). OnIt's own tickets expire after 900s; we are
 # tighter because a voice agent should not hang mid-conversation.
 MCP_APPROVAL_TIMEOUT = float(os.environ.get("FWEDDIE_MCP_APPROVAL_TIMEOUT", 120))
+
+# ---------------------------------------------------------------------------
+# Dashboard (Streamlit, reachable from other devices on the LAN)
+# ---------------------------------------------------------------------------
+# The dashboard is a separate process (dashboard.py) that tails a shared
+# event log the agent appends to, and exchanges live approval decisions with
+# the agent through two small files next to that log. Off by default so the
+# agent runs headless on the Pi with no extra surface; set FWEDDIE_DASHBOARD=1
+# to turn it on (the agent then also writes the log so a dashboard can show
+# the session).
+DASHBOARD_ENABLED = os.environ.get("FWEDDIE_DASHBOARD", "0") == "1"
+# Where the agent writes the JSONL event log the dashboard tails. The
+# approval files live next to it: <log>.pending.json and <log>.decision.json.
+DASHBOARD_LOG = os.environ.get("FWEDDIE_DASHBOARD_LOG", "/tmp/fweddie_events.jsonl")
+# Streamlit bind: 0.0.0.0 so other devices on the LAN can open it.
+DASHBOARD_HOST = os.environ.get("FWEDDIE_DASHBOARD_HOST", "0.0.0.0")
+DASHBOARD_PORT = int(os.environ.get("FWEDDIE_DASHBOARD_PORT", 8501))
 
 # ---------------------------------------------------------------------------
 # Persona / system prompt

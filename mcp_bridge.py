@@ -230,6 +230,20 @@ def _result_to_text(result: Any) -> str:
     return text or "(no output)"
 
 
+def _short(value: Any, limit: int = 600) -> str:
+    """Render a tool arg/result for the dashboard, capped so one huge file
+    read cannot bloat the event log."""
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, ensure_ascii=False, default=str)
+        except Exception:  # noqa: BLE001
+            text = str(value)
+    text = " ".join(text.split())  # collapse newlines/whitespace to one line
+    return text if len(text) <= limit else text[:limit] + " …"
+
+
 # ---------------------------------------------------------------------------
 # The approval guard: human-in-the-loop for commands OnIt's policy will not
 # decide alone
@@ -252,12 +266,16 @@ class Guard:
     """Human-in-the-loop approval for OnIt's ``needs_approval`` payloads."""
 
     def __init__(self, prompt: Optional[Callable[[dict], str]] = None,
-                 timeout: Optional[float] = None):
+                 timeout: Optional[float] = None,
+                 bus: Any = None):
         # ``prompt`` shows the person the pending command and returns their
         # answer: "once" (run it this time), "session" (run it and remember),
         # or "deny". Defaults to an interactive stdin prompt.
         self.prompt = prompt or self._stdin_prompt
         self.timeout = timeout if timeout is not None else config.MCP_APPROVAL_TIMEOUT
+        # Optional event bus (eventbus.EventBus). When set, every tool call and
+        # approval decision is recorded so the dashboard can show it live.
+        self.bus = bus
         self._pending: Optional[dict] = None
         self._refused: set[str] = set()   # command digests a person said no to
         self._granted: set[str] = set()   # command digests approved for the session
@@ -314,29 +332,62 @@ class Guard:
           3. records refusals so the same command is not re-asked.
         Returns the final text to hand to the LLM.
         """
+        # Record the call so the dashboard can show what the agent is doing.
+        if self.bus is not None:
+            await self.bus.emit("tool_call", tool=tool_name,
+                                args=_short(args), server=server.name)
+
         result = await call(tool_name, args)
         payload = self._parse_approval(result)
         if payload is None:
+            if self.bus is not None:
+                await self.bus.emit("tool_result", tool=tool_name,
+                                    result=_short(result))
             return result
 
         # A person already said no to this exact command this session.
         if self.is_refused(payload.get("command", "")):
+            if self.bus is not None:
+                await self.bus.emit("approval_denied", tool=tool_name,
+                                    command=payload.get("command", ""),
+                                    reason="already declined this session")
             return ("[denied] A person already declined this command. Do not "
                     "retry it or try another route around the policy.")
 
         self._pending = payload
-        # Ask the person (may block on stdin; run in a thread so we don't stall
-        # the event loop for other frames).
-        decision = await asyncio.to_thread(self.prompt, payload)
+        if self.bus is not None:
+            self.bus.set_pending_approval(payload)
+            self.bus.write_pending(payload)
+            await self.bus.emit("approval_requested", tool=tool_name,
+                                command=payload.get("command", ""),
+                                reason=payload.get("reason", ""))
+
+        # Ask a person. Prefer the dashboard (a person on the LAN can click a
+        # button); fall back to the console prompt if the dashboard is down.
+        decision: Optional[str] = None
+        if self.bus is not None:
+            decision = await self.bus.request_approval(payload)
+        if decision is None:
+            # May block on stdin; run in a thread so we don't stall the loop.
+            decision = await asyncio.to_thread(self.prompt, payload)
         self._pending = None
+        if self.bus is not None:
+            self.bus.clear_pending_approval()
 
         if decision == "deny":
             self._refused.add(self._digest(payload.get("command", "")))
+            if self.bus is not None:
+                await self.bus.emit("approval_denied", tool=tool_name,
+                                    command=payload.get("command", ""))
             return ("[denied] A person declined to approve this command. It "
                     "was not run. Do not retry it or try another route around "
                     "the policy.")
         if decision == "session":
             self._granted.add(self._digest(payload.get("command", "")))
+        if self.bus is not None:
+            await self.bus.emit("approval_granted", tool=tool_name,
+                                command=payload.get("command", ""),
+                                scope=decision)
 
         # Re-issue the call carrying the single-use ticket + the person's scope.
         retry_args = dict(args)
@@ -346,8 +397,14 @@ class Guard:
         # If it still asks (ticket raced / policy changed), surface it plainly
         # rather than looping.
         if self._parse_approval(result2) is not None:
+            if self.bus is not None:
+                await self.bus.emit("tool_result", tool=tool_name,
+                                    result="[denied] approval could not be redeemed")
             return ("[denied] The approval could not be redeemed. The command "
                     "was not run.")
+        if self.bus is not None:
+            await self.bus.emit("tool_result", tool=tool_name,
+                                result=_short(result2))
         return result2
 
     @staticmethod
