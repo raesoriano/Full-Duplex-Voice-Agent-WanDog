@@ -23,6 +23,7 @@ import pyaudio
 from loguru import logger
 
 import config
+import mcp_bridge
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.processors.audio.vad_processor import VADProcessor
@@ -37,6 +38,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.piper.tts import PiperTTSService
@@ -70,8 +72,13 @@ class FweddieLogger(FrameProcessor):
             logger.error("[error] {}", frame.error)
 
 
-def build_pipeline(api_key: str):
-    """Construct the Pipecat pipeline. Returns (pipeline, task, input, output)."""
+def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None" = None):
+    """Construct the Pipecat pipeline.
+
+    Returns (pipeline, task, input, output). When ``bridge`` is given, its
+    tools are registered on the LLM context so the model can call OnIt's
+    tools; the system prompt is extended to tell it so.
+    """
 
     # --- Audio transport (mic + speaker) -----------------------------------
     pa = pyaudio.PyAudio()
@@ -103,12 +110,15 @@ def build_pipeline(api_key: str):
     )
 
     # --- LLM (OnIt, OpenAI-compatible, raw-audio input) --------------------
+    system_prompt = config.SYSTEM_PROMPT
+    if bridge is not None:
+        system_prompt = (system_prompt + " " + config.TOOLS_SYSTEM_PROMPT).strip()
     llm = OpenAILLMService(
         api_key=api_key,
         base_url=config.LLM_BASE_URL,
         settings=OpenAILLMService.Settings(
             model=config.LLM_MODEL,
-            system_instruction=config.SYSTEM_PROMPT,
+            system_instruction=system_prompt,
             temperature=config.LLM_TEMPERATURE,
             max_tokens=config.LLM_MAX_TOKENS,
         ),
@@ -120,10 +130,21 @@ def build_pipeline(api_key: str):
         download_dir=config.PIPER_VOICE_DIR,
     )
 
+    # --- LLM context (tools) -------------------------------------------------
+    # When the bridge is active, hand the LLM an LLMContext carrying OnIt's
+    # tools. Pipecat registers each tool as a function call and feeds results
+    # back to the model. Without a bridge there is no context (Fweddie just
+    # talks), which is the original behaviour.
+    context = None
+    if bridge is not None and bridge.tools:
+        context = LLMContext(
+            messages=[{"role": "system", "content": system_prompt}],
+            tools=bridge.tools,
+        )
+
     # --- Pipeline ------------------------------------------------------------
     # Input transport emits InputAudioRawFrame; the LLM service (OpenAI
     # compatible) accepts raw audio input frames directly, so no STT stage.
-    # The system prompt (persona) is carried on the LLM service's settings.
     pipeline = Pipeline(
         [
             input_transport,
@@ -134,7 +155,7 @@ def build_pipeline(api_key: str):
             FweddieLogger(),
         ]
     )
-    task = PipelineTask(pipeline)
+    task = PipelineTask(pipeline, context=context)
 
     return pipeline, task, input_transport, output_transport
 
@@ -142,11 +163,28 @@ def build_pipeline(api_key: str):
 async def run() -> None:
     api_key = config.resolve_llm_api_key()
 
-    pipeline, task, input_transport, output_transport = build_pipeline(api_key)
+    # Build the OnIt MCP tool bridge (spawns OnIt's stdio servers). None when
+    # tools are disabled or OnIt's interpreter is missing.
+    #
+    # The Guard is the harness side of OnIt's approval safeguard: when a
+    # command is not on the allowlist, the OnIt server returns a
+    # needs_approval ticket and the Guard asks a person (stdin by default)
+    # whether to redeem it. Fail-closed: no answer within the timeout = deny.
+    guard = mcp_bridge.Guard(timeout=config.MCP_APPROVAL_TIMEOUT)
+    bridge = mcp_bridge.build_bridge(guard=guard)
+    if bridge is not None:
+        await bridge.discover()
+
+    pipeline, task, input_transport, output_transport = build_pipeline(api_key, bridge)
 
     logger.info("Fweddie starting")
     logger.info("  LLM : {} @ {}", config.LLM_MODEL, config.LLM_BASE_URL)
     logger.info("  TTS : Piper {} ({})", config.PIPER_VOICE, config.PIPER_VOICE_DIR)
+    if bridge is not None:
+        logger.info("  Tools: {} OnIt MCP tools (jail: {})",
+                    len(bridge.tools), config.MCP_DATA_PATH)
+        logger.info("  Guard: approval gate on (timeout {}s, fail-closed)",
+                    config.MCP_APPROVAL_TIMEOUT)
     logger.info(
         "  Audio: in {} Hz, out {} Hz", config.INPUT_SAMPLE_RATE, config.OUTPUT_SAMPLE_RATE
     )
@@ -164,6 +202,8 @@ async def run() -> None:
         logger.info("Shutting down...")
     finally:
         await runner.cancel()
+        if bridge is not None:
+            await bridge.close()
         logger.info("Bye!")
 
 

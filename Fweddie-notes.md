@@ -109,7 +109,50 @@ Stop with **Ctrl+C**.
   its `pkg_resources` build.
 - Venv: 154 packages, 1.4 GB, verified `import torch` → `ModuleNotFoundError`.
 
-## 7. Open questions / next steps
+## 7. Safeguards (adapted from OnIt)
+
+Fweddie does **not** re-implement OnIt's safeguards. It spawns OnIt's own stdio
+MCP servers (`mcp_bridge.py`), so the policy runs inside the spawned process
+and applies to every tool call. Three layers:
+
+1. **AST command allowlist** (`command_policy.py`). Every executable in a
+   command -- including inside `$(...)`, pipelines, and loops -- must be on the
+   allowlist; package installs are gated and must be version-pinned. Fail-closed:
+   anything it cannot statically parse is blocked. On a host the allowlist is off
+   by default, so `mcp_bridge` pins `ONIT_COMMAND_ALLOWLIST=1` to turn it on.
+2. **DATA_PATH file jail**. `read_file`/`write_file`/`edit_file`/`serve`/`grep`
+   are confined to `MCP_DATA_PATH` (default `/tmp/onit/data`); paths outside it
+   are refused.
+3. **Human-in-the-loop approval** (`approvals.py` + `mcp_bridge.Guard`). A
+   command the allowlist will not decide alone is not refused outright: the
+   server returns a `needs_approval` ticket (single-use, bound to that exact
+   command) and the **Guard** -- the harness side -- shows a person the command
+   and re-issues the call carrying the ticket (`approval_token` +
+   `approval_scope`). A refusal is remembered for the session so the model
+   cannot retry it. Fail-closed: no answer within `MCP_APPROVAL_TIMEOUT` = deny.
+
+The two env vars `mcp_bridge` sets when spawning the servers are what make the
+safeguards actually fire (without them every ask collapses to a hard deny):
+
+| Var | Effect |
+|---|---|
+| `ONIT_COMMAND_ALLOWLIST=1` | enforce the AST allowlist (off by default on a host) |
+| `ONIT_APPROVAL_CHANNEL=1` | a person is reachable, so ASK -> ticket (else ASK -> deny) |
+
+The `approval_token`/`approval_scope` parameters are **harness-filled**: the
+model never sees them, and the server overwrites them on every call, so a value
+the model made up never reaches the policy.
+
+Verified end-to-end against the real OnIt server:
+- `echo hi` -> runs (allowlisted)
+- `lscpu` (unlisted) -> `needs_approval` ticket -> Guard redeems -> runs
+- `sudo reboot` (never-ask) -> hard deny, no ticket
+- a refused command -> remembered, re-ask is refused without prompting
+
+`test_guard.py` covers the Guard's logic (allow-through, redeem once/session,
+refuse + remember, prose passthrough) with a stubbed tool call.
+
+## 8. Open questions / next steps
 - [ ] **Live mic test on the Pi** — confirm capture card at 48 kHz, speaker out,
       and barge-in feel. (Can't be done in this sandbox — no real audio device.)
       No `export` needed: run `onit setup` once to store the key, then just
@@ -117,7 +160,8 @@ Stop with **Ctrl+C**.
 - [ ] Confirm the OnIt endpoint accepts **raw audio input** on the model we use;
       if it's text-only, add an ASR stage (faster-whisper / sherpa-onnx, already
       in requirements) between VAD and LLM.
-- [ ] Add the rest of the pipeline: **ASR**, **MCP tools** (weather, web,
-      smart-home), **dashboard**, **music**.
+- [ ] Add the rest of the pipeline: **ASR**, **dashboard**, **music**.
+      (MCP tools are in -- see section 7; OnIt's tools + safeguards are wired
+      through the MCP bridge.)
 - [ ] Tune VAD thresholds (`confidence`, `stop_secs`) and TTS volume for the room.
 - [ ] Decide on a wake word / "always listening" policy.
