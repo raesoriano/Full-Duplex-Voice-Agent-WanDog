@@ -50,9 +50,8 @@ onnxruntime>=1.17.0          # primary VAD -- SileroVADAnalyzer runs the Silero
 webrtcvad>=2.0.10            # lightweight fallback VAD -- zero dependencies
 setuptools<81                # for pkg_resources (webrtcvad build)
 
-# --- LLM (OpenAI-compatible + native Ollama endpoints) ---
-openai>=1.74.0               # deep model (OnIt endpoint at 202.92.159.240:8001)
-ollama>=0.6.0                # live model (gemma4:31b-cloud on api.ollama.com, Ollama-native)
+# --- LLM (OpenAI-compatible endpoint -- OnIt's DGX cluster) ---
+openai>=1.74.0               # Qwen3.8-27B on the DGX vLLM endpoint (202.92.159.240:8001)
 keyring>=25.0.0              # read OnIt's endpoint keys from the OS keychain
 
 # --- Audio I/O ---

@@ -77,10 +77,13 @@ VAD_STOP_SECS = float(os.environ.get("FWEDDIE_VAD_STOP", 0.8))
 VAD_MIN_VOLUME = int(os.environ.get("FWEDDIE_VAD_MIN_VOLUME", 400))
 
 # ---------------------------------------------------------------------------
-# LLM (OpenAI-compatible endpoint -- OnIt)
+# LLM (OpenAI-compatible endpoint -- OnIt's DGX cluster)
 # ---------------------------------------------------------------------------
+# The DGX cluster serves Qwen3.8-27B through vLLM with an OpenAI-compatible
+# API. Ollama's free cloud models (e.g. gemma4:31b-cloud) are no longer
+# available, so the default is the on-prem DGX model.
 LLM_BASE_URL = os.environ.get("ONIT_LLM_BASE_URL", "http://202.92.159.240:8001/v1")
-LLM_MODEL = os.environ.get("ONIT_LLM_MODEL", "gpt-4o-mini")
+LLM_MODEL = os.environ.get("ONIT_LLM_MODEL", "Qwen/Qwen3.8-27B")
 LLM_TEMPERATURE = float(os.environ.get("ONIT_LLM_TEMPERATURE", 0.7))
 LLM_MAX_TOKENS = int(os.environ.get("ONIT_LLM_MAX_TOKENS", 300))
 

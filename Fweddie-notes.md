@@ -24,7 +24,7 @@ mic ──▶ VAD (Silero ONNX) ──▶ LLM (OnIt, OpenAI-compatible) ──�
 |---|---|---|
 | Framework | **Pipecat 1.15.0** | Full-duplex pipeline, barge-in, VAD, transports |
 | VAD | **Silero ONNX** via `VADProcessor(SileroVADAnalyzer)` | Runs on `onnxruntime` (CPU) — **no torch** |
-| LLM | **OnIt endpoint** (`http://202.92.159.240:8001/v1`) via `OpenAILLMService` | OpenAI-compatible; consumes **raw audio** input (no STT stage in v1) |
+| LLM | **OnIt DGX cluster** (`http://202.92.159.240:8001/v1`) via `OpenAILLMService` | OpenAI-compatible vLLM endpoint; model **`Qwen/Qwen3.8-27B`** (Ollama's free cloud models, e.g. `gemma4:31b-cloud`, are no longer available) |
 | TTS | **Piper** `en_US-lessac-medium` via `PiperTTSService` | Local, low-latency; voice already on disk |
 | Audio I/O | `LocalAudioInput/OutputTransport` (PyAudio/ALSA) | Mic + speaker on the Pi |
 | Persona | "Fweddie" — short spoken replies, no markdown | Set in `config.py:SYSTEM_PROMPT` |
