@@ -165,15 +165,24 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     system_prompt = config.SYSTEM_PROMPT
     if bridge is not None:
         system_prompt = (system_prompt + " " + config.TOOLS_SYSTEM_PROMPT).strip()
+    llm_settings: dict = dict(
+        model=config.LLM_MODEL,
+        system_instruction=system_prompt,
+        temperature=config.LLM_TEMPERATURE,
+        max_tokens=config.LLM_MAX_TOKENS,
+    )
+    if not config.LLM_THINKING:
+        # Thinking models (Qwen3.x) return empty `content` by default; their
+        # reasoning goes to a separate field. Disable it so the voice agent
+        # actually gets text to speak. vLLM-specific, so it rides in
+        # `extra` -> `extra_body`.
+        llm_settings["extra"] = {
+            "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}
+        }
     llm = OpenAILLMService(
         api_key=api_key,
         base_url=config.LLM_BASE_URL,
-        settings=OpenAILLMService.Settings(
-            model=config.LLM_MODEL,
-            system_instruction=system_prompt,
-            temperature=config.LLM_TEMPERATURE,
-            max_tokens=config.LLM_MAX_TOKENS,
-        ),
+        settings=OpenAILLMService.Settings(**llm_settings),
     )
 
     # --- TTS (Piper, local) -------------------------------------------------

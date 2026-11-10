@@ -24,7 +24,7 @@ mic ──▶ VAD (Silero ONNX) ──▶ LLM (OnIt, OpenAI-compatible) ──�
 |---|---|---|
 | Framework | **Pipecat 1.15.0** | Full-duplex pipeline, barge-in, VAD, transports |
 | VAD | **Silero ONNX** via `VADProcessor(SileroVADAnalyzer)` | Runs on `onnxruntime` (CPU) — **no torch** |
-| LLM | **OnIt DGX cluster** (`http://202.92.159.240:8001/v1`) via `OpenAILLMService` | OpenAI-compatible vLLM endpoint; model **`Qwen/Qwen3.8-27B`** (Ollama's free cloud models, e.g. `gemma4:31b-cloud`, are no longer available) |
+| LLM | **OnIt DGX cluster** (`http://202.92.159.240:8001/v1`) via `OpenAILLMService` | OpenAI-compatible vLLM endpoint; model **`Qwen/Qwen3.8-27B`** (Ollama's free cloud models, e.g. `gemma4:31b-cloud`, are no longer available). Qwen3.8 is a *thinking* model — by default it spends its tokens on internal reasoning and returns empty `content`, so `agent.py` sends `chat_template_kwargs.enable_thinking=false` (vLLM) unless `ONIT_LLM_THINKING=1` |
 | TTS | **Piper** `en_US-lessac-medium` via `PiperTTSService` | Local, low-latency; voice already on disk |
 | Audio I/O | `LocalAudioInput/OutputTransport` (PyAudio/ALSA) | Mic + speaker on the Pi |
 | Persona | "Fweddie" — short spoken replies, no markdown | Set in `config.py:SYSTEM_PROMPT` |
@@ -232,10 +232,27 @@ device). `config.py` sets `INPUT_DEVICE_INDEX=0` and `OUTPUT_DEVICE_INDEX=1`
 by default and passes them to `LocalAudioTransportParams`. Override with
 `FWEDDIE_IN_DEVICE` / `FWEDDIE_OUT_DEVICE` (an empty value = system default).
 
-## 11. Open questions / next steps
+## 11. LLM: DGX Qwen3.8-27B (post-Ollama-cloud)
+- Ollama ended its free cloud models, so the LLM is the on-prem DGX cluster:
+  `Qwen/Qwen3.8-27B` served by vLLM at `http://202.92.159.240:8001/v1`
+  (OpenAI-compatible).
+- **API key lives in the OS keychain** (gnome-keyring, service `onit`, entry
+  `endpoint_key:http://202.92.159.240:8001/v1`) — stored by `onit setup`,
+  resolved by `config.resolve_llm_api_key()` (env → keychain →
+  `~/.onit/secrets.yaml` → `OPENAI_API_KEY`). No export needed at run time.
+- **Thinking disabled by default.** Qwen3.8 is a thinking model: with thinking
+  on, vLLM returns empty `content` (the reasoning goes to a separate field),
+  which would make the voice agent silent. `agent.py` therefore adds
+  `extra_body={"chat_template_kwargs": {"enable_thinking": false}}`;
+  `ONIT_LLM_THINKING=1` restores the model default.
+- Verified end-to-end: `test_llm_live.py` builds pipecat's `OpenAILLMService`
+  exactly as `agent.py` does (keychain key, thinking off) and gets a real
+  reply from the DGX model.
+
+## 12. Open questions / next steps
 - [ ] **Live mic test on the Pi** — confirm capture card, speaker out, and
       barge-in feel. (Can't be done in this sandbox — no real audio device.)
-      No `export` needed: run `onit setup` once to store the key, then just
+      No `export` needed: the key is in the OS keychain, so just
       `.venv/bin/python agent.py`.
 - [ ] Add **music** (YouTube download + playback) as an OnIt tool.
 - [ ] Tune VAD thresholds (`confidence`, `stop_secs`) and TTS volume for the room.

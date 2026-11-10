@@ -86,6 +86,12 @@ LLM_BASE_URL = os.environ.get("ONIT_LLM_BASE_URL", "http://202.92.159.240:8001/v
 LLM_MODEL = os.environ.get("ONIT_LLM_MODEL", "Qwen/Qwen3.8-27B")
 LLM_TEMPERATURE = float(os.environ.get("ONIT_LLM_TEMPERATURE", 0.7))
 LLM_MAX_TOKENS = int(os.environ.get("ONIT_LLM_MAX_TOKENS", 300))
+# Qwen3.8 is a thinking model: by default it spends its token budget on
+# internal reasoning and returns an empty `content` (the reasoning arrives in
+# a separate field), which would make the voice agent say nothing. vLLM
+# accepts `chat_template_kwargs` to switch the template's thinking off.
+# Set ONIT_LLM_THINKING=1 to restore the model's default (thinking on).
+LLM_THINKING = os.environ.get("ONIT_LLM_THINKING", "0") == "1"
 
 # ---------------------------------------------------------------------------
 # OnIt MCP tools (spawn OnIt's own stdio servers and expose their tools)
