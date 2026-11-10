@@ -138,6 +138,10 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         audio_out_sample_rate=config.OUTPUT_SAMPLE_RATE,
         audio_out_channels=1,
         audio_out_volume=1.0,
+        # Pin the mic (USB PnP Audio Device) and speaker (USB Composite
+        # Device) so the agent never picks the wrong card.
+        input_device_index=config.INPUT_DEVICE_INDEX,
+        output_device_index=config.OUTPUT_DEVICE_INDEX,
     )
     input_transport = LocalAudioInputTransport(pa, transport_params)
     output_transport = LocalAudioOutputTransport(pa, transport_params)

@@ -37,9 +37,22 @@ PIPER_VOICE = os.environ.get("FWEDDIE_PIPER_VOICE", "en_US-lessac-medium")
 INPUT_SAMPLE_RATE = int(os.environ.get("FWEDDIE_IN_RATE", 48000))
 OUTPUT_SAMPLE_RATE = int(os.environ.get("FWEDDIE_OUT_RATE", 24000))
 
-# Optional explicit PyAudio device indices (None = system default).
-INPUT_DEVICE_INDEX = os.environ.get("FWEDDIE_IN_DEVICE")
-OUTPUT_DEVICE_INDEX = os.environ.get("FWEDDIE_OUT_DEVICE")
+# PyAudio device indices. Pinned by default to the two USB devices on the Pi:
+#   index 0 = "USB PnP Audio Device"   (hw:2,0) -- the MIC (verified: it is the
+#              card that actually returns audio on capture)
+#   index 1 = "USB Composite Device"   (hw:3,0) -- the SPEAKER (playback)
+# Override with FWEDDIE_IN_DEVICE / FWEDDIE_OUT_DEVICE (an empty string means
+# "use the system default" instead of a pinned index).
+def _device_index(env: str, default: int) -> int | None:
+    raw = os.environ.get(env)
+    if raw is None:
+        return default
+    raw = raw.strip()
+    return int(raw) if raw else None
+
+
+INPUT_DEVICE_INDEX = _device_index("FWEDDIE_IN_DEVICE", 0)
+OUTPUT_DEVICE_INDEX = _device_index("FWEDDIE_OUT_DEVICE", 1)
 
 # ---------------------------------------------------------------------------
 # ASR (faster-whisper, local -- no API key)

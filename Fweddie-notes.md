@@ -208,7 +208,23 @@ Tests: `test_eventbus.py` covers emit + dashboard read, half-written-line
 tolerance, the approval handshake (dashboard -> agent), and the console
 fallback when the dashboard is off.
 
-## 10. Open questions / next steps
+## 10. Audio devices (pinned)
+
+The Pi has two USB audio cards; the agent now pins them so it never picks the
+wrong one:
+
+| Role    | PyAudio index | ALSA      | USB device            |
+|---------|---------------|-----------|-----------------------|
+| Mic     | `0`           | `hw:2,0`  | USB PnP Audio Device  |
+| Speaker | `1`           | `hw:3,0`  | USB Composite Device  |
+
+Verified by live capture: the PnP card (index 0) returns real audio on
+capture; the Composite card (index 1) is silent (it is the playback/speaker
+device). `config.py` sets `INPUT_DEVICE_INDEX=0` and `OUTPUT_DEVICE_INDEX=1`
+by default and passes them to `LocalAudioTransportParams`. Override with
+`FWEDDIE_IN_DEVICE` / `FWEDDIE_OUT_DEVICE` (an empty value = system default).
+
+## 11. Open questions / next steps
 - [ ] **Live mic test on the Pi** — confirm capture card, speaker out, and
       barge-in feel. (Can't be done in this sandbox — no real audio device.)
       No `export` needed: run `onit setup` once to store the key, then just
