@@ -23,7 +23,7 @@ mic ──▶ VAD (Silero ONNX) ──▶ LLM (OnIt, OpenAI-compatible) ──�
 | Component | Choice | Why |
 |---|---|---|
 | Framework | **Pipecat 1.15.0** | Full-duplex pipeline, barge-in, VAD, transports |
-| VAD | **Silero ONNX** via `VADProcessor(SileroVADAnalyzer)` | Runs on `onnxruntime` (CPU) — **no torch** |
+| VAD | **Silero ONNX** `SileroVADAnalyzer`, owned by the `LLMUserAggregator` | Runs on `onnxruntime` (CPU) — **no torch**. In 1.15 the analyzer is *not* a standalone `VADProcessor`; it is handed to the user aggregator, whose `UserTurnController` + `VADUserTurnStartStrategy` drive barge-in (see §13) |
 | LLM | **OnIt DGX cluster** (`http://202.92.159.240:8001/v1`) via `OpenAILLMService` | OpenAI-compatible vLLM endpoint; model **`Qwen/Qwen3.8-27B`** (Ollama's free cloud models, e.g. `gemma4:31b-cloud`, are no longer available). Qwen3.8 is a *thinking* model — by default it spends its tokens on internal reasoning and returns empty `content`, so `agent.py` sends `chat_template_kwargs.enable_thinking=false` (vLLM) unless `ONIT_LLM_THINKING=1` |
 | TTS | **Piper** `en_US-lessac-medium` via `PiperTTSService` | Local, low-latency; voice already on disk |
 | Audio I/O | `LocalAudioInput/OutputTransport` (PyAudio/ALSA) | Mic + speaker on the Pi |
@@ -249,7 +249,46 @@ by default and passes them to `LocalAudioTransportParams`. Override with
   exactly as `agent.py` does (keychain key, thinking off) and gets a real
   reply from the DGX model.
 
-## 12. Open questions / next steps
+## 13. Barge-in (fixed 2026-11-10)
+
+Barge-in — the bot stops talking the instant you start speaking — was **broken
+in two independent ways** in the Pipecat 1.15 upgrade. Both are fixed and
+verified by `test_bargein.py` (all 3 checks PASS).
+
+**How barge-in works in 1.15.** It is *not* driven by a standalone
+`VADProcessor` (the old pattern). The `SileroVADAnalyzer` is handed to the
+`LLMUserAggregator`; its internal `UserTurnController` +
+`VADUserTurnStartStrategy` turn a `VADUserStartedSpeakingFrame` into an
+`InterruptionFrame`, which every processor (including the TTS output transport)
+handles by stopping the bot's speech.
+
+**Bug 1 — the user aggregator was only created when a tool bridge existed.**
+In the default config (ASR on, no tools) there was *no* `LLMUserAggregator` in
+the pipeline at all, so there was no turn controller and barge-in silently did
+nothing. **Fix:** `agent.py` now *always* builds an `LLMUserAggregator` with the
+VAD analyzer and a `VADUserTurnStartStrategy`, and puts it in the pipeline
+(`mic → ASR → user agg → LLM → [assistant agg] → TTS`). The assistant aggregator
+is still only added when there are tools (it records replies into context).
+
+**Bug 2 — `VAD_MIN_VOLUME` was on the wrong scale.** Pipecat 1.15 measures
+volume as a **0.0–1.0** float (BS.1770 loudness), but `config.py` still used the
+old int16-amplitude value `400`. The state machine requires
+`confidence >= VAD_CONFIDENCE AND volume >= VAD_MIN_VOLUME`, so
+`volume (0–1) >= 400` was *always* False → VAD never reached SPEAKING → no
+barge-in even with the wiring. **Fix:** `VAD_MIN_VOLUME` is now a float, default
+`0.6` (the Pipecat default), overridable via `FWEDDIE_VAD_MIN_VOLUME`.
+
+**Verification** (`test_bargein.py`):
+1. **Wiring** — the real `build_pipeline` output contains an
+   `LLMUserAggregator` with a VAD analyzer + `VADUserTurnStartStrategy`.
+2. **Trigger** — the exact `UserTurnController` + `VADUserTurnStartStrategy`
+   the aggregator uses fires `on_user_turn_started` with
+   `enable_interruptions=True` on a `VADUserStartedSpeakingFrame`.
+3. **VAD** — the real `SileroVADAnalyzer` reaches `SPEAKING` on real English
+   speech (generated with espeak-ng), proving a real user's voice will trigger
+   the path above.
+
+## 14. Open questions / next steps
 - [ ] **Live mic test on the Pi** — confirm capture card, speaker out, and
       barge-in feel. (Can't be done in this sandbox — no real audio device.)
       No `export` needed: the key is in the OS keychain, so just

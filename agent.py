@@ -27,7 +27,6 @@ import config
 import mcp_bridge
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -42,8 +41,13 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
+    LLMAssistantAggregator,
+    LLMAssistantAggregatorParams,
+    LLMUserAggregator,
+    LLMUserAggregatorParams,
 )
+from pipecat.turns.user_start.vad_user_turn_start_strategy import VADUserTurnStartStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.piper.tts import PiperTTSService
@@ -147,18 +151,20 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     output_transport = LocalAudioOutputTransport(pa, transport_params)
 
     # --- VAD (Silero ONNX, torch-free) -------------------------------------
-    # VADProcessor is the FrameProcessor that wraps the analyzer and pushes
-    # UserStarted/StoppedSpeaking frames into the pipeline (drives barge-in).
-    vad = VADProcessor(
-        vad_analyzer=SileroVADAnalyzer(
-            sample_rate=config.INPUT_SAMPLE_RATE,
-            params=VADParams(
-                confidence=config.VAD_CONFIDENCE,
-                start_secs=config.VAD_START_SECS,
-                stop_secs=config.VAD_STOP_SECS,
-                min_volume=config.VAD_MIN_VOLUME,
-            ),
-        )
+    # In Pipecat 1.15 barge-in is NOT driven by a standalone VADProcessor.
+    # The analyzer is handed to the LLM user aggregator (below), whose
+    # internal UserTurnController + VADUserTurnStartStrategy turn "user
+    # started speaking" into an InterruptionFrame that stops the bot's TTS.
+    # The analyzer must run at the mic's capture rate (in_rate), which is the
+    # rate of the InputAudioRawFrames it will see in the pipeline.
+    vad_analyzer = SileroVADAnalyzer(
+        sample_rate=in_rate,
+        params=VADParams(
+            confidence=config.VAD_CONFIDENCE,
+            start_secs=config.VAD_START_SECS,
+            stop_secs=config.VAD_STOP_SECS,
+            min_volume=config.VAD_MIN_VOLUME,
+        ),
     )
 
     # --- LLM (OnIt, OpenAI-compatible, raw-audio input) --------------------
@@ -207,34 +213,50 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
             compute_type=config.ASR_COMPUTE,
         )
 
-    # --- LLM context (tools) -------------------------------------------------
-    # In Pipecat 1.15 the LLM context (conversation history + tools) is
-    # delivered to the LLM by a pair of context aggregators in the pipeline:
-    # the user aggregator sits before the LLM (pushes an LLMContextFrame with
-    # the current context + tools each turn) and the assistant aggregator sits
-    # after it (records the reply). Without a bridge there is no context
-    # (Fweddie just talks), which is the original behaviour.
-    pair = None
+    # --- LLM user aggregator (context + barge-in) ----------------------------
+    # This is the stage that drives barge-in in 1.15: it owns the VAD analyzer
+    # and the UserTurnController, and when the user starts speaking it
+    # broadcasts an InterruptionFrame that stops the bot's TTS. It must ALWAYS
+    # be in the pipeline -- even with no tools -- or barge-in silently does not
+    # work. (Previously it was only created when a tool bridge existed, which
+    # disabled barge-in in the default no-tools, ASR-on configuration.)
+    user_params = LLMUserAggregatorParams(
+        vad_analyzer=vad_analyzer,
+        # VAD-only turn start: the turn (and the barge-in) fires the moment the
+        # analyzer hears speech, without waiting for a transcript.
+        user_turn_strategies=UserTurnStrategies(start=[VADUserTurnStartStrategy()]),
+    )
+    user_agg = LLMUserAggregator(
+        LLMContext(messages=[{"role": "system", "content": system_prompt}]),
+        params=user_params,
+    )
+
+    # The assistant aggregator records the bot's replies into the same context.
+    # It is only needed when there is a context to record into (tools present);
+    # without it the bot still talks, it just has no multi-turn memory.
+    assistant_agg = None
     if bridge is not None and bridge.tools:
         context = LLMContext(
             messages=[{"role": "system", "content": system_prompt}],
             tools=bridge.tools,
         )
-        pair = LLMContextAggregatorPair(context)
+        assistant_agg = LLMAssistantAggregator(
+            context,
+            params=LLMAssistantAggregatorParams(),
+        )
 
     # --- Pipeline ------------------------------------------------------------
-    # mic -> VAD -> ASR -> [user agg] -> LLM -> [assistant agg] -> TTS -> speaker.
-    # The ASR stage (faster-whisper) turns the user's audio into text; the LLM
-    # consumes that text. When ASR is off, the LLM takes raw audio directly
-    # (the original path).
-    stages = [input_transport, vad]
+    # mic -> ASR -> user agg (VAD + barge-in) -> LLM -> [assistant agg] -> TTS.
+    # The user aggregator sits after ASR so it sees the user's audio (for VAD)
+    # and the transcript (for context) and pushes the LLMContextFrame to the
+    # LLM. When ASR is off the LLM takes raw audio directly (original path).
+    stages = [input_transport]
     if stt is not None:
         stages.append(stt)
-    if pair is not None:
-        stages.append(pair.user())
+    stages.append(user_agg)
     stages.append(llm)
-    if pair is not None:
-        stages.append(pair.assistant())
+    if assistant_agg is not None:
+        stages.append(assistant_agg)
     stages += [tts, output_transport, FweddieLogger(bus)]
     pipeline = Pipeline(stages)
     task = PipelineTask(pipeline)

@@ -74,7 +74,10 @@ ASR_SAMPLE_RATE = 16000
 VAD_CONFIDENCE = float(os.environ.get("FWEDDIE_VAD_CONFIDENCE", 0.7))
 VAD_START_SECS = float(os.environ.get("FWEDDIE_VAD_START", 0.2))
 VAD_STOP_SECS = float(os.environ.get("FWEDDIE_VAD_STOP", 0.8))
-VAD_MIN_VOLUME = int(os.environ.get("FWEDDIE_VAD_MIN_VOLUME", 400))
+# Pipecat 1.15 measures volume on a 0.0–1.0 scale (BS.1770 loudness), not the
+# old int16 amplitude. A value like 400 (the pre-1.15 default) makes
+# `volume >= min_volume` always False, so VAD never fires and barge-in dies.
+VAD_MIN_VOLUME = float(os.environ.get("FWEDDIE_VAD_MIN_VOLUME", 0.6))
 
 # ---------------------------------------------------------------------------
 # LLM (OpenAI-compatible endpoint -- OnIt's DGX cluster)
