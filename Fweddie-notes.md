@@ -131,6 +131,14 @@ and applies to every tool call. Three layers:
    `approval_scope`). A refusal is remembered for the session so the model
    cannot retry it. Fail-closed: no answer within `MCP_APPROVAL_TIMEOUT` = deny.
 
+**Web search** (`search` tool, 'net' profile). Ollama ended its free cloud
+web-search API, so OnIt's search chain no longer has an ollama tier: it is now
+Tavily (only when `TAVILY_API_KEY` is set) -> DuckDuckGo (`ddgs`, free, no
+key). DuckDuckGo intermittently returns "No results found" under load, so
+`_search_ddgs` retries up to 3 times with a 1s pause. Verified live over MCP:
+`test_search_live.py` spawns the real 'net' server and checks `search`
+returns results for both `type="web"` and `type="news"`.
+
 The two env vars `mcp_bridge` sets when spawning the servers are what make the
 safeguards actually fire (without them every ask collapses to a hard deny):
 
