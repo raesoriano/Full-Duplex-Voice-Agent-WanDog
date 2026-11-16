@@ -199,6 +199,17 @@ class PartialTranscriptTap(FrameProcessor):
         self._last = ""
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        # super() is NOT optional: FrameProcessor.process_frame() is what handles
+        # StartFrame (marking this stage started and letting the pipeline become
+        # ready) and CancelFrame/InterruptionFrame. Without it this stage never
+        # reports itself started, the StartFrame handshake stalls, and every
+        # frame queued behind it -- including the final TranscriptionFrame that
+        # closes the turn -- waits forever. Symptom: the transcript is produced
+        # and logged by the STT, the VAD stop is seen, and then the turn only
+        # ever ends on the 5 s inactivity ceiling with an EMPTY transcript, so
+        # the LLM is asked "the user said something but it was not recognized".
+        await super().process_frame(frame, direction)
+
         # Partial transcripts are ours to forward; everything else is pushed
         # through untouched so the aggregator behaves exactly as before.
         if isinstance(frame, InterimTranscriptionFrame):

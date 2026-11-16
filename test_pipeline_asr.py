@@ -67,6 +67,8 @@ TURN_SUBMIT_BUDGET = 2.5   # VAD stop -> user message added. Was 5.2 s.
 QUESTIONS = [
     ("/tmp/q_math.wav", ("2 plus 2", "two plus two")),
     ("/tmp/q_dog.wav", ("dog",)),
+    ("/tmp/q_long.wav", ("plus", "dog")),   # 3.5 s: longer than the old 3 s stop timeout
+    ("/tmp/q_vlong.wav", ("plus", "dog")),  # 5.6 s: longer than even the 5 s ceiling
 ]
 
 

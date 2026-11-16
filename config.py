@@ -160,9 +160,21 @@ VAD_STOP_SECS = float(os.environ.get("FWEDDIE_VAD_STOP", 0.7))
 # inside a sentence without feeling laggy. Raise it if you dictate slowly and
 # the agent keeps cutting you off; lower it to 0.4 for snappier replies.
 TURN_STOP_SECS = float(os.environ.get("FWEDDIE_TURN_STOP", 0.6))
-# Hard ceiling: seconds without any user activity before an open turn is
-# closed regardless of what the stop strategy thinks (Pipecat default 5.0).
-TURN_STOP_TIMEOUT_SECS = float(os.environ.get("FWEDDIE_TURN_STOP_TIMEOUT", 3.0))
+# Hard ceiling: seconds without ANY user activity before an open turn is
+# closed regardless of what the stop strategy thinks.
+#
+# This is Pipecat's own default (5.0) and must not be lowered to a value
+# near the length of a spoken question. It is an inactivity ceiling, not a
+# transcription deadline: the timer is reset by audio activity, but the
+# transcript for the segment is produced after the VAD stop and takes
+# ~0.9-2.0 s. Set it to 3.0 and any question longer than ~3 s from its first
+# word to the moment the transcript lands gets force-closed with NO user
+# message at all -- the aggregator then answers a "user spoke but was not
+# recognised, ask them to repeat" prompt. Measured on a 3.5 s question:
+# turn closed 31 ms before the VAD stop, prompt contained system+developer
+# only, and the reply was "could you repeat that" -- the agent "not
+# answering". Leave this at 5.0.
+TURN_STOP_TIMEOUT_SECS = float(os.environ.get("FWEDDIE_TURN_STOP_TIMEOUT", 5.0))
 
 # Pipecat 1.15 measures volume on a 0.0-1.0 scale (BS.1770 loudness), not the
 # old int16 amplitude. A value like 400 (the pre-1.15 default) makes
