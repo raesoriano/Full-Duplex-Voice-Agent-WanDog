@@ -39,6 +39,7 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMuteFrame,
     TranscriptionFrame,
+    InterimTranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -52,12 +53,16 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.turns.user_start.vad_user_turn_start_strategy import VADUserTurnStartStrategy
+from pipecat.turns.user_stop.speech_timeout_user_turn_stop_strategy import (
+    SpeechTimeoutUserTurnStopStrategy,
+)
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.piper.tts import PiperTTSService
 from pipecat.services.whisper.stt import WhisperSTTService
+from streaming_asr import SherpaStreamingSTTService
 from pipecat.transports.local.audio import (
     LocalAudioInputTransport,
     LocalAudioOutputTransport,
@@ -173,6 +178,43 @@ class FweddieLogger(FrameProcessor):
             logger.error(" {}", frame.error)
 
 
+class PartialTranscriptTap(FrameProcessor):
+    """Publish live partial transcripts to the event bus.
+
+    The streaming ASR emits an ``InterimTranscriptionFrame`` every few hundred
+    milliseconds while the user is talking. Those frames are consumed by the
+    user aggregator (they never reach the tail of the pipeline), so the
+    dashboard cannot see them from ``FweddieLogger``. This tap sits between the
+    STT and the aggregator and forwards each partial as a ``user_partial``
+    event, which the dashboard renders as a growing draft line above the chat.
+
+    The final ``TranscriptionFrame`` still arrives through the aggregator's
+    ``on_user_turn_message_added`` event as ``user_text``; the dashboard clears
+    the draft when it sees that.
+    """
+
+    def __init__(self, bus=None):
+        super().__init__()
+        self.bus = bus
+        self._last = ""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        # Partial transcripts are ours to forward; everything else is pushed
+        # through untouched so the aggregator behaves exactly as before.
+        if isinstance(frame, InterimTranscriptionFrame):
+            text = (frame.text or "").strip()
+            if self.bus is not None and text and text != self._last:
+                self._last = text
+                await self.bus.emit("user_partial", text=text)
+            await self.push_frame(frame, direction)
+            return
+
+        if isinstance(frame, TranscriptionFrame):
+            self._last = ""
+
+        await self.push_frame(frame, direction)
+
+
 def wire_transcript_events(user_agg, assistant_agg, bus) -> None:
     """Record the user's words and the bot's reply on the event bus.
 
@@ -239,8 +281,20 @@ def report_mic_gain() -> None:
         logger.debug("Could not read mic gain: {}", e)
 
 
+def describe_asr() -> str:
+    """One-line label for the ASR stage, for the log and the dashboard."""
+    if not config.ASR_ENABLED:
+        return "off (raw-audio LLM)"
+    if config.ASR_BACKEND == "streaming":
+        label = "streaming " + Path(config.ASR_STREAM_MODEL_DIR).name
+        if config.ASR_FINAL_PASS == "whisper":
+            label += " + final " + config.ASR_FINAL_MODEL
+        return label
+    return "whisper " + config.ASR_MODEL
+
+
 def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None" = None,
-                   bus=None):
+                   bus=None, transports=None):
     """Construct the Pipecat pipeline.
 
     Returns (pipeline, task, input, output). When ``bridge`` is given, its
@@ -250,32 +304,38 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     """
 
     # --- Audio transport (mic + speaker) -----------------------------------
-    # Read-only: the agent must never touch the mic gain (see report_mic_gain).
-    report_mic_gain()
-    pa = pyaudio.PyAudio()
-    # The mic is ALWAYS captured at the hardware rate (48 kHz). This card
-    # accepts no other capture rate -- 8k/16k/22.05k/32k/44.1k/96k all fail
-    # with "Errno -9997 Invalid sample rate". We therefore capture at 48 kHz
-    # and convert down to what VAD and ASR need (16 kHz) in the pipeline,
-    # using AudioResampleProcessor right after the input transport.
+    # ``transports`` lets a test inject a transport pair (see test_pipeline_asr.py)
+    # so the whole chain -- VAD, streaming ASR, aggregators, LLM -- can be
+    # driven from a wav file without a microphone. Production passes None.
     capture_rate = config.INPUT_SAMPLE_RATE
     # Everything downstream of the resampler sees this rate.
     proc_rate = config.ASR_SAMPLE_RATE if config.ASR_ENABLED else capture_rate
-    transport_params = LocalAudioTransportParams(
-        audio_in_enabled=True,
-        audio_in_sample_rate=capture_rate,
-        audio_in_channels=1,
-        audio_out_enabled=True,
-        audio_out_sample_rate=config.OUTPUT_SAMPLE_RATE,
-        audio_out_channels=1,
-        audio_out_volume=1.0,
-        # Pin the mic (USB PnP Audio Device) and speaker (USB Composite
-        # Device) so the agent never picks the wrong card.
-        input_device_index=config.INPUT_DEVICE_INDEX,
-        output_device_index=config.OUTPUT_DEVICE_INDEX,
-    )
-    input_transport = LocalAudioInputTransport(pa, transport_params)
-    output_transport = LocalAudioOutputTransport(pa, transport_params)
+    if transports is not None:
+        input_transport, output_transport = transports
+    else:
+        # Read-only: the agent must never touch the mic gain (see report_mic_gain).
+        report_mic_gain()
+        pa = pyaudio.PyAudio()
+        # The mic is ALWAYS captured at the hardware rate (48 kHz). This card
+        # accepts no other capture rate -- 8k/16k/22.05k/32k/44.1k/96k all fail
+        # with "Errno -9997 Invalid sample rate". We therefore capture at 48 kHz
+        # and convert down to what VAD and ASR need (16 kHz) in the pipeline,
+        # using AudioResampleProcessor right after the input transport.
+        transport_params = LocalAudioTransportParams(
+            audio_in_enabled=True,
+            audio_in_sample_rate=capture_rate,
+            audio_in_channels=1,
+            audio_out_enabled=True,
+            audio_out_sample_rate=config.OUTPUT_SAMPLE_RATE,
+            audio_out_channels=1,
+            audio_out_volume=1.0,
+            # Pin the mic (USB PnP Audio Device) and speaker (USB Composite
+            # Device) so the agent never picks the wrong card.
+            input_device_index=config.INPUT_DEVICE_INDEX,
+            output_device_index=config.OUTPUT_DEVICE_INDEX,
+        )
+        input_transport = LocalAudioInputTransport(pa, transport_params)
+        output_transport = LocalAudioOutputTransport(pa, transport_params)
 
     # --- VAD (Silero ONNX, torch-free) -------------------------------------
     # In Pipecat 1.15 barge-in is NOT driven by a standalone VADProcessor.
@@ -325,21 +385,44 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         download_dir=config.PIPER_VOICE_DIR,
     )
 
-    # --- ASR (faster-whisper, local -- no API key) --------------------------
-    # The mic captures at 48 kHz; faster-whisper wants 16 kHz, so we resample
-    # the transport to 16 kHz and let the LLM consume the transcribed TEXT
-    # instead of raw audio. This is what makes the dashboard able to show the
-    # user's words. Disabled (ASR_ENABLED=0) falls back to raw-audio LLM.
+    # --- ASR (local, no API key) --------------------------------------------
+    # Two backends (see config.ASR_BACKEND):
+    #
+    #   streaming -- sherpa-onnx zipformer decodes the mic as it arrives, so
+    #       the words appear while you are still talking and the final text is
+    #       ready the moment you stop. This is the default.
+    #   whisper   -- the old segmented faster-whisper path: silence until you
+    #       stop, then ~4.9 s of transcription on this Pi.
+    #
+    # Either way the mic's 48 kHz is resampled to 16 kHz first, and the LLM
+    # consumes TEXT rather than raw audio, which is what lets the dashboard
+    # show your words.
     stt = None
     if config.ASR_ENABLED:
-        stt = WhisperSTTService(
-            settings=WhisperSTTService.Settings(
-                model=config.ASR_MODEL,
+        if config.ASR_BACKEND == "streaming":
+            stt = SherpaStreamingSTTService(
+                model_dir=config.ASR_STREAM_MODEL_DIR,
+                num_threads=config.ASR_THREADS,
+                final_pass=config.ASR_FINAL_PASS,
+                final_model=config.ASR_FINAL_MODEL,
+                final_compute=config.ASR_COMPUTE,
                 language=config.ASR_LANGUAGE,
-            ),
-            device=config.ASR_DEVICE,
-            compute_type=config.ASR_COMPUTE,
-        )
+                pre_roll_secs=config.ASR_PREROLL_SECS,
+                # Measured: the streaming final text is ready at speech end, so
+                # the only wait is the faster-whisper pass (~0.9 s for a short
+                # turn). This is the safety net the turn stop strategy uses if
+                # a transcript never arrives.
+                ttfs_p99_latency=1.2,
+            )
+        else:
+            stt = WhisperSTTService(
+                settings=WhisperSTTService.Settings(
+                    model=config.ASR_MODEL,
+                    language=config.ASR_LANGUAGE,
+                ),
+                device=config.ASR_DEVICE,
+                compute_type=config.ASR_COMPUTE,
+            )
 
     # --- LLM user aggregator (context + barge-in) ----------------------------
     # This is the stage that drives barge-in in 1.15: it owns the VAD analyzer
@@ -352,7 +435,19 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         vad_analyzer=vad_analyzer,
         # VAD-only turn start: the turn (and the barge-in) fires the moment the
         # analyzer hears speech, without waiting for a transcript.
-        user_turn_strategies=UserTurnStrategies(start=[VADUserTurnStartStrategy()]),
+        #
+        # The stop side is what used to cost 3 of the 5.2 s on every turn. The
+        # 1.15 default is Smart Turn (TurnAnalyzerUserTurnStopStrategy), which
+        # waits 3 s of silence and then asks the STT for text it does not have.
+        # With streaming ASR the text is already in hand when you stop, so a
+        # plain speech timeout is both faster and more predictable: the turn
+        # ends TURN_STOP_SECS after the VAD stop.
+        user_turn_strategies=UserTurnStrategies(
+            start=[VADUserTurnStartStrategy()],
+            stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=config.TURN_STOP_SECS)],
+        ),
+        # Hard ceiling so a turn can never hang open waiting for text.
+        user_turn_stop_timeout=config.TURN_STOP_TIMEOUT_SECS,
     )
     #
     # BOTH aggregators must share ONE context. The user half is what pushes
@@ -405,6 +500,9 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     ]
     if stt is not None:
         stages.append(stt)
+        # Publish the live partial transcripts the streaming ASR emits. Must sit
+        # between the STT and the aggregator: the aggregator consumes them.
+        stages.append(PartialTranscriptTap(bus))
     # The mic toggle pushes STTMuteFrame UPSTREAM, so it must sit downstream of
     # the STT for that frame to reach it.
     stages.append(MicControlWatcher(
@@ -457,15 +555,12 @@ async def run() -> None:
 
     await bus.emit("session_start",
                    llm=config.LLM_MODEL, base_url=config.LLM_BASE_URL,
-                   asr=("on:" + config.ASR_MODEL) if config.ASR_ENABLED else "off",
+                   asr=describe_asr(),
                    tools=len(bridge.tools) if bridge else 0)
 
     logger.info("Fweddie starting")
     logger.info("  LLM : {} @ {}", config.LLM_MODEL, config.LLM_BASE_URL)
-    if config.ASR_ENABLED:
-        logger.info("  ASR : {} ({})", config.ASR_MODEL, config.ASR_COMPUTE)
-    else:
-        logger.info("  ASR : off (raw-audio LLM)")
+    logger.info("  ASR : {}", describe_asr())
     logger.info("  TTS : Piper {} ({})", config.PIPER_VOICE, config.PIPER_VOICE_DIR)
     if config.DASHBOARD_ENABLED:
         logger.info("  Dash: on (log: {}, approval via {} / {})",

@@ -71,17 +71,55 @@ MIC_CARD = os.environ.get("FWEDDIE_MIC_CARD", "2")
 OUTPUT_DEVICE_INDEX = _device_index("FWEDDIE_OUT_DEVICE", 1)
 
 # ---------------------------------------------------------------------------
-# ASR (faster-whisper, local -- no API key)
+# ASR (local, no API key)
 # ---------------------------------------------------------------------------
-# The agent used to feed raw audio straight to the LLM. It now runs a local
-# ASR stage (faster-whisper) so the LLM consumes TEXT. The `small` model is
-# already cached under ~/.cache/huggingface, so no download is needed.
+# Two backends, selected with FWEDDIE_ASR_BACKEND:
+#
+#   "streaming" (default) -- sherpa-onnx streaming zipformer. Decodes the mic
+#       audio as it arrives, so the words appear WHILE you are still talking.
+#       Measured here: first partial ~1.0 s after you start speaking, and the
+#       final text ready the instant you stop. Accuracy on this mic is good
+#       for ordinary words but poor on numbers ("2 plus 2" -> "TOO PLUS"),
+#       so by default a faster-whisper pass produces the authoritative final
+#       text (see ASR_FINAL_MODEL) while the streaming model drives the live
+#       partials. Speech end -> final transcript: ~1.6 s.
+#
+#   "whisper" -- the old segmented faster-whisper path: nothing at all until
+#       you stop speaking, then ~4.9 s of transcription. Kept as a fallback
+#       and for A/B comparison (FWEDDIE_ASR_BACKEND=whisper).
+#
+# Both want 16 kHz, so the 48 kHz capture is resampled down once, before VAD.
 ASR_ENABLED = os.environ.get("FWEDDIE_ASR", "1") != "0"
+ASR_BACKEND = os.environ.get("FWEDDIE_ASR_BACKEND", "streaming").strip().lower()
+
+# --- streaming backend ------------------------------------------------------
+# Directory holding the sherpa-onnx streaming zipformer. Downloaded once into
+# the repo (models/ is gitignored); the service raises a clear error naming the
+# download command if it is missing.
+ASR_STREAM_MODEL_DIR = os.environ.get(
+    "FWEDDIE_ASR_STREAM_DIR",
+    str(Path(__file__).with_name("models")
+        / "sherpa-onnx-streaming-zipformer-en-2023-06-26"),
+)
+# ONNX Runtime threads for the encoder. The Pi has 4 cores and must also run
+# VAD, the LLM client and Piper, so leave headroom.
+ASR_THREADS = int(os.environ.get("FWEDDIE_ASR_THREADS", 2))
+# Second, non-streaming pass that produces the final text. "none" disables it
+# and uses the streaming model's own output as the final transcript.
+ASR_FINAL_PASS = os.environ.get("FWEDDIE_ASR_FINAL", "whisper").strip().lower()
+# tiny.en transcribes this Pi's audio in 0.86 s and is word-perfect on the test
+# captures; base.en is 1.6 s and small.en 4.9 s for no gain on short turns.
+ASR_FINAL_MODEL = os.environ.get("FWEDDIE_ASR_FINAL_MODEL", "tiny.en")
+# Audio kept from before the VAD fires (it needs ~0.25 s of speech to trigger,
+# and without this the streaming decoder starts mid-word).
+ASR_PREROLL_SECS = float(os.environ.get("FWEDDIE_ASR_PREROLL", 1.0))
+
+# --- whisper backend (segmented) -------------------------------------------
 ASR_MODEL = os.environ.get("FWEDDIE_ASR_MODEL", "small")
 ASR_DEVICE = os.environ.get("FWEDDIE_ASR_DEVICE", "auto")   # auto|cpu|cuda
 ASR_COMPUTE = os.environ.get("FWEDDIE_ASR_COMPUTE", "int8")  # int8 is fast on the Pi
 ASR_LANGUAGE = os.environ.get("FWEDDIE_ASR_LANGUAGE", "en")
-# Resample the 48 kHz capture to 16 kHz for ASR (faster-whisper wants 16k).
+# Resample the 48 kHz capture to 16 kHz for ASR (both backends want 16k).
 ASR_SAMPLE_RATE = 16000
 
 # ---------------------------------------------------------------------------
@@ -101,6 +139,31 @@ ASR_SAMPLE_RATE = 16000
 VAD_CONFIDENCE = float(os.environ.get("FWEDDIE_VAD_CONFIDENCE", 0.6))
 VAD_START_SECS = float(os.environ.get("FWEDDIE_VAD_START", 0.25))
 VAD_STOP_SECS = float(os.environ.get("FWEDDIE_VAD_STOP", 0.7))
+
+# ---------------------------------------------------------------------------
+# Turn end ("the user has finished asking")
+# ---------------------------------------------------------------------------
+# Pipecat 1.15 defaults to the Smart Turn analyzer, which waits 3 s of silence
+# after the VAD stop before it will call the turn over -- and only then does
+# the STT get asked for its text. Measured on this Pi, the gap from "VAD says
+# you stopped talking" to "turn submitted to the LLM" was 5.2 s on every single
+# turn:
+#
+#     0.7 s VAD  +  3.0 s Smart Turn  +  1.0 s STT wait  ~=  5.2 s
+#
+# With streaming ASR the transcript is already in hand when you stop, so none
+# of that wait buys anything. This switches the stop strategy to a plain
+# speech-timeout: end the turn TURN_STOP_SECS after the VAD stop, once a
+# transcript has arrived.
+#
+# 0.6 s is the strategy's own default and is enough to cover "hmm" pauses
+# inside a sentence without feeling laggy. Raise it if you dictate slowly and
+# the agent keeps cutting you off; lower it to 0.4 for snappier replies.
+TURN_STOP_SECS = float(os.environ.get("FWEDDIE_TURN_STOP", 0.6))
+# Hard ceiling: seconds without any user activity before an open turn is
+# closed regardless of what the stop strategy thinks (Pipecat default 5.0).
+TURN_STOP_TIMEOUT_SECS = float(os.environ.get("FWEDDIE_TURN_STOP_TIMEOUT", 3.0))
+
 # Pipecat 1.15 measures volume on a 0.0-1.0 scale (BS.1770 loudness), not the
 # old int16 amplitude. A value like 400 (the pre-1.15 default) makes
 # `volume >= min_volume` always False, so VAD never fires and barge-in dies.

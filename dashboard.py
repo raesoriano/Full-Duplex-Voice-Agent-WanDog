@@ -10,7 +10,9 @@ The event vocabulary the agent emits is ``kind``-based, NOT role-based:
     session_start  {llm, base_url, asr, tools, ts}
     session_end    {}
     user_started   {}                      -- VAD fired
-    user_text      {text}                  -- ASR transcript   (what you said)
+    user_partial   {text}                  -- live ASR draft, re-sent as the
+                                              words arrive while you talk
+    user_text      {text}                  -- final ASR transcript (what you said)
     user_stopped   {}
     bot_started    {}
     bot_text       {text}                  -- the reply        (what it said)
@@ -52,7 +54,13 @@ st.set_page_config(page_title="Fweddie Voice Dashboard", layout="wide")
 
 def read_events(limit: int = 200) -> list[dict]:
     """Return the last ``limit`` events, oldest first. Tolerates a line being
-    written at the moment we read it (JSONDecodeError -> skip)."""
+    written at the moment we read it (JSONDecodeError -> skip).
+
+    Consecutive ``user_partial`` events collapse to the newest one: each
+    supersedes the last, so keeping the history would scroll the conversation
+    away. A draft is dropped entirely once a later ``user_text`` arrives -- that
+    final transcript is the same turn, spelled correctly.
+    """
     if not LOG_PATH.exists():
         return []
     try:
@@ -65,9 +73,23 @@ def read_events(limit: int = 200) -> list[dict]:
         if not line:
             continue
         try:
-            events.append(json.loads(line))
+            ev = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if ev.get("kind") == "user_partial" and events and events[-1].get("kind") == "user_partial":
+            events[-1] = ev
+            continue
+        events.append(ev)
+
+    last_user_text = max(
+        (i for i, e in enumerate(events) if e.get("kind") == "user_text"), default=-1
+    )
+    if last_user_text >= 0:
+        events = [
+            e
+            for i, e in enumerate(events)
+            if not (e.get("kind") == "user_partial" and i < last_user_text)
+        ]
     return events
 
 
@@ -163,6 +185,16 @@ else:
                 with st.chat_message("user", avatar="🎤"):
                     st.write(ev.get("text", ""))
                     st.caption(f"you · {ts}")
+
+            elif kind == "user_partial":
+                # The draft line: re-emitted every ~0.3 s while you are still
+                # talking, so only the most recent one is shown, and only until
+                # the final transcript for that turn arrives.
+                st.markdown(
+                    f"<div style='opacity:0.55;font-style:italic'>🎤 "
+                    f"{ev.get('text', '')}…</div>",
+                    unsafe_allow_html=True,
+                )
 
             elif kind == "bot_text":
                 with st.chat_message("assistant", avatar="🔊"):
