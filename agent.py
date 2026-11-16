@@ -344,19 +344,30 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         # analyzer hears speech, without waiting for a transcript.
         user_turn_strategies=UserTurnStrategies(start=[VADUserTurnStartStrategy()]),
     )
-    user_agg = LLMUserAggregator(
-        LLMContext(messages=[{"role": "system", "content": system_prompt}]),
-        params=user_params,
-    )
-
-    # The assistant aggregator records the bot's replies into the context. It is
-    # also the ONLY place the bot's finished reply text is available (it
-    # consumes LLMTextFrame), so the dashboard's bot_text event comes from it.
-    # It is therefore always built, not just when tools are present.
+    #
+    # BOTH aggregators must share ONE context. The user half is what pushes
+    # LLMContextFrame -- that object IS the prompt the model receives. The
+    # assistant half records the bot's replies by writing them into ITS
+    # context. Give them two different LLMContext objects and the model's
+    # replies are written to a context nobody ever sends: every prompt becomes
+    #
+    #     [system, user("Q1"), user("Q2"), user("Q3"), ...]
+    #
+    # with no assistant turns at all. The model then sees a stack of
+    # unanswered questions and picks whichever one it likes -- which is
+    # exactly the "it answers the previous question" symptom. Tools went to
+    # the assistant context too, so the model was also told nothing about
+    # them. One shared context fixes both.
     context_kwargs = {"messages": [{"role": "system", "content": system_prompt}]}
     if bridge is not None and bridge.tools:
         context_kwargs["tools"] = bridge.tools
     context = LLMContext(**context_kwargs)
+    user_agg = LLMUserAggregator(context, params=user_params)
+
+    # The assistant aggregator records the bot's replies into the SAME context.
+    # It is also the ONLY place the bot's finished reply text is available (it
+    # consumes LLMTextFrame), so the dashboard's bot_text event comes from it.
+    # It is therefore always built, not just when tools are present.
     assistant_agg = LLMAssistantAggregator(
         context,
         params=LLMAssistantAggregatorParams(),
