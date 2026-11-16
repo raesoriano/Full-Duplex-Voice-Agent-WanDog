@@ -98,7 +98,7 @@ address.)
 cd /home/raesoriano/sandbox/Fweddie-repo
 
 # One-time: the streaming ASR model (321 MB, gitignored)
-cd models
+mkdir -p models && cd models
 curl -LO https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2
 tar xf sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2
 cd ..

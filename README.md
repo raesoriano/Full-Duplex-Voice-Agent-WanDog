@@ -72,7 +72,7 @@ Both are configurable: `FWEDDIE_ASR_BACKEND` (`streaming` | `whisper`), `FWEDDIE
 **The model weights (321 MB) are not in the repo** — `models/` is gitignored. Download once per machine:
 
 ```bash
-cd models
+mkdir -p models && cd models
 curl -LO https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2
 tar xf sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2
 ```

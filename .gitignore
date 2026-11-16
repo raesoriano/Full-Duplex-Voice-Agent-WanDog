@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 
 # ASR model weights (321 MB zipformer). Downloaded once per machine:
-#   cd models && curl -LO https://github.com/k2-fsa/sherpa-onnx/releases/\
+#   mkdir -p models && cd models && curl -LO https://github.com/k2-fsa/sherpa-onnx/releases/\
 #   download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2
 #   tar xf sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2
 models/

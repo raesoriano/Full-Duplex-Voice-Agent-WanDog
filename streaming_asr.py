@@ -157,7 +157,8 @@ class SherpaStreamingSTTService(STTService):
             raise FileNotFoundError(
                 f"streaming ASR model not found: {d}\n"
                 "Download it with:\n"
-                "  cd models && curl -LO https://github.com/k2-fsa/sherpa-onnx/"
+                "  mkdir -p models && cd models && curl -LO "
+                "https://github.com/k2-fsa/sherpa-onnx/"
                 "releases/download/asr-models/"
                 "sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2\n"
                 "  tar xf sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2"
