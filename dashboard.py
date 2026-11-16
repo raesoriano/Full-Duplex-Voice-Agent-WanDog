@@ -1,24 +1,33 @@
-"""Fweddie -- live interaction dashboard (Streamlit).
+"""Fweddie -- Streamlit dashboard: live chat transcript + mic control.
 
-Shows what the voice agent is doing, in real time, from any device on the
-LAN:
+Two processes talk through files (see ``eventbus.py``):
 
-  * a running transcript of the user's words (ASR) and Fweddie's replies
-  * the OnIt tools the agent calls and what they return
-  * a live approval panel -- when a command needs a person's approval, it
-    appears here and you approve/deny it with a button
+  * the agent appends one JSON object per line to ``config.DASHBOARD_LOG``;
+  * this page tails that file and renders it as a chat.
 
-It is a separate process from the agent. They coordinate through plain files
-(no version-specific Streamlit/Flask API, so it is robust):
-  * the dashboard tails the agent's JSONL event log (config.DASHBOARD_LOG)
-  * the agent writes a pending approval to <log>.pending.json; this app shows
-    it and, when you click a button, writes your decision to
-    <log>.decision.json, which the agent polls.
+The event vocabulary the agent emits is ``kind``-based, NOT role-based:
 
-Run (from the repo, in the venv):
-    .venv/bin/python -m streamlit run dashboard.py \
-        --server.address 0.0.0.0 --server.port 8501
-Then open http://<this-host-ip>:8501 from another device on the LAN.
+    session_start  {llm, base_url, asr, tools, ts}
+    session_end    {}
+    user_started   {}                      -- VAD fired
+    user_text      {text}                  -- ASR transcript   (what you said)
+    user_stopped   {}
+    bot_started    {}
+    bot_text       {text}                  -- the reply        (what it said)
+    bot_stopped    {}
+    tool_call      {name, args}
+    tool_result    {name, result}
+    approval       {...}
+
+An earlier version of this file read ``role`` / ``content`` / ``timestamp``
+from each line, which the agent never writes -- so the log always rendered
+empty no matter what you said. That is fixed here: every event is mapped by
+its ``kind``.
+
+Mic control is a small JSON file next to the log
+(``<log>.mic_control.json``). The agent polls it (see ``MicControlWatcher``
+in ``agent.py``) and mutes/unmutes the ASR to match. Before this, the toggle
+wrote the file but no agent code ever read it, so it did nothing.
 """
 
 from __future__ import annotations
@@ -32,168 +41,173 @@ import streamlit as st
 import config
 
 LOG_PATH = Path(config.DASHBOARD_LOG)
-PENDING_PATH = LOG_PATH.with_name(LOG_PATH.name + ".pending.json")
-DECISION_PATH = LOG_PATH.with_name(LOG_PATH.name + ".decision.json")
-POLL_SECS = 0.6  # how often to re-read the log / re-render
+MIC_CONTROL_FILE = Path(config.DASHBOARD_LOG).with_suffix(".mic_control.json")
+
+st.set_page_config(page_title="Fweddie Voice Dashboard", layout="wide")
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
-def _write_decision(decision: str) -> None:
-    """Write the person's decision for the agent to pick up."""
-    try:
-        DECISION_PATH.parent.mkdir(parents=True, exist_ok=True)
-        DECISION_PATH.write_text(
-            json.dumps({"decision": decision, "ts": time.time()}), encoding="utf-8"
-        )
-    except Exception:  # noqa: BLE001 -- best effort
-        pass
-
-
-def _read_pending() -> dict:
-    """Read the agent's pending approval, if any. Returns {} when none."""
-    try:
-        if not PENDING_PATH.exists():
-            return {}
-        return json.loads(PENDING_PATH.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return {}
-
-
-def _read_events(since: float) -> list[tuple[float, dict]]:
-    """Read events newer than ``since`` from the JSONL log. Tolerates a
-    missing file and a half-written last line."""
-    events = []
+def read_events(limit: int = 200) -> list[dict]:
+    """Return the last ``limit`` events, oldest first. Tolerates a line being
+    written at the moment we read it (JSONDecodeError -> skip)."""
     if not LOG_PATH.exists():
-        return events
+        return []
     try:
-        with LOG_PATH.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    ev = json.loads(line)
-                except json.JSONDecodeError:
-                    continue  # half-written line; next poll catches it
-                ts = ev.get("ts", 0)
-                if ts > since:
-                    events.append((ts, ev))
-    except FileNotFoundError:
-        pass
+        lines = LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    events = []
+    for line in lines[-limit:]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
     return events
 
 
-def _fmt_ts(ts: float) -> str:
-    return time.strftime("%H:%M:%S", time.localtime(ts))
+def mic_state() -> bool:
+    try:
+        return bool(json.loads(MIC_CONTROL_FILE.read_text(encoding="utf-8"))["enabled"])
+    except Exception:
+        return True
 
 
-def main() -> None:
-    st.set_page_config(page_title="Fweddie", page_icon="🎙️", layout="wide")
-    st.title("🎙️ Fweddie — live interaction")
+def set_mic_state(enabled: bool) -> None:
+    MIC_CONTROL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    MIC_CONTROL_FILE.write_text(json.dumps({"enabled": enabled}), encoding="utf-8")
 
-    # Streamlit reruns the script top-to-bottom on every interaction / auto-
-    # rerun. We keep the "last seen ts" in session_state so we only render new
-    # events, and we auto-rerun on a timer to poll the log.
-    if "last_ts" not in st.session_state:
-        st.session_state.last_ts = time.time() - 5  # show a little history on load
-    if "events" not in st.session_state:
-        st.session_state.events = []
 
-    new = _read_events(st.session_state.last_ts)
-    if new:
-        st.session_state.events.extend(ev for _, ev in new)
-        st.session_state.last_ts = max(ts for ts, _ in new)
-        if len(st.session_state.events) > 2000:
-            st.session_state.events = st.session_state.events[-2000:]
+def fmt_time(ts) -> str:
+    try:
+        return time.strftime("%H:%M:%S", time.localtime(float(ts)))
+    except (TypeError, ValueError):
+        return ""
 
-    events = st.session_state.events
 
-    # -- Approval panel (top, so it is never missed) ------------------------
-    pending = _read_pending()
-    if pending:
-        st.warning("⚠️  Fweddie needs your approval before it can run a command")
-        st.markdown(f"**Command:** `{pending.get('command', '')}`")
-        if pending.get("reason"):
-            st.caption(f"Reason: {pending['reason']}")
-        if pending.get("subjects"):
-            st.caption(f"About: {', '.join(map(str, pending['subjects']))}")
-        c1, c2, c3 = st.columns(3)
-        if c1.button("✅ Approve once", key="ap-once", type="primary"):
-            _write_decision("once")
-            st.rerun()
-        if c2.button("🔁 Approve this session", key="ap-session"):
-            _write_decision("session")
-            st.rerun()
-        if c3.button("❌ Deny", key="ap-deny"):
-            _write_decision("deny")
-            st.rerun()
-        st.divider()
-    else:
-        st.caption("No pending approvals.")
+# ---------------------------------------------------------------------------
+# Sidebar: mic control
+# ---------------------------------------------------------------------------
 
-    # -- Status row ---------------------------------------------------------
-    started = next((e for e in reversed(events) if e.get("kind") == "session_start"), None)
-    ended = any(e.get("kind") == "session_end" for e in events[-5:])
-    status = "🔴 ended" if ended else ("🟢 live" if started else "⚪ waiting for agent")
-    asr = (started or {}).get("asr", "?")
-    tools = (started or {}).get("tools", "?")
-    s1, s2, s3 = st.columns(3)
-    s1.metric("Status", status)
-    s2.metric("ASR", asr)
-    s3.metric("OnIt tools", tools)
-    st.divider()
+st.sidebar.header("Controls")
 
-    # -- Transcript + tool activity -----------------------------------------
-    left, right = st.columns([3, 2])
 
-    with left:
-        st.subheader("Transcript")
+def _on_mic_toggle() -> None:
+    """Write the toggle straight to the control file, in the widget callback.
+
+    Doing it here rather than by comparing the widget value to the file after
+    the fact avoids a fight with Streamlit's widget state: with the comparison
+    approach the widget could re-render showing a stale value and the file
+    silently disagreed with the switch.
+    """
+    set_mic_state(bool(st.session_state["mic_on"]))
+
+
+# Seed session state from the file only on the first run, so a value the user
+# set is not overwritten on every rerun.
+if "mic_on" not in st.session_state:
+    st.session_state["mic_on"] = mic_state()
+
+st.sidebar.toggle(
+    "Microphone active",
+    key="mic_on",
+    on_change=_on_mic_toggle,
+    help="Mutes the agent's speech recognition. It keeps listening for "
+         "barge-in, but will not transcribe or answer.",
+)
+
+if not st.session_state["mic_on"]:
+    st.sidebar.warning("The agent will not transcribe while muted.")
+
+st.sidebar.divider()
+st.sidebar.caption(f"Event log\n\n`{LOG_PATH}`")
+st.sidebar.caption(f"Mic control\n\n`{MIC_CONTROL_FILE}`")
+
+events = read_events()
+if events:
+    last = events[-1].get("ts")
+    st.sidebar.caption(f"Last event: {fmt_time(last)}")
+else:
+    st.sidebar.caption("No events yet.")
+
+# ---------------------------------------------------------------------------
+# Main: chat transcript
+# ---------------------------------------------------------------------------
+
+st.title("Fweddie Voice Agent")
+
+if not LOG_PATH.exists():
+    st.info(
+        "Waiting for the agent to start. Run `.venv/bin/python agent.py` "
+        "in the repo, then speak."
+    )
+else:
+
+    @st.fragment(run_every=1.0)
+    def render_log():
+        events = read_events()
         if not events:
-            st.info("Waiting for the agent to start talking…")
+            st.info("The log is empty. Is the agent running?")
+            return
+
         for ev in events:
-            kind = ev.get("kind")
+            kind = ev.get("kind", "")
+            ts = fmt_time(ev.get("ts"))
+
             if kind == "user_text":
-                st.markdown(f"**🧑 You**  ·  {_fmt_ts(ev.get('ts', 0))}\n\n{ev.get('text','')}")
-                st.divider()
+                with st.chat_message("user", avatar="🎤"):
+                    st.write(ev.get("text", ""))
+                    st.caption(f"you · {ts}")
+
             elif kind == "bot_text":
-                st.markdown(f"**🤖 Fweddie**  ·  {_fmt_ts(ev.get('ts', 0))}\n\n{ev.get('text','')}")
-                st.divider()
-            elif kind == "session_start":
-                st.caption(f"Session started · {ev.get('llm','?')} @ {ev.get('base_url','?')}")
-            elif kind == "session_end":
-                st.caption(f"Session ended · {_fmt_ts(ev.get('ts', 0))}")
+                with st.chat_message("assistant", avatar="🔊"):
+                    st.write(ev.get("text", ""))
+                    st.caption(f"fweddie · {ts}")
 
-    with right:
-        st.subheader("Tools & safeguards")
-        tool_events = [e for e in events if e.get("kind") in (
-            "tool_call", "tool_result", "approval_requested",
-            "approval_granted", "approval_denied")]
-        if not tool_events:
-            st.info("No tool activity yet.")
-        for ev in tool_events:
-            kind = ev.get("kind")
-            ts = _fmt_ts(ev.get("ts", 0))
-            if kind == "tool_call":
-                st.markdown(f"🔧 **{ev.get('tool','?')}**  ·  {ts}")
-                if ev.get("args"):
-                    st.code(str(ev.get("args")), language=None)
+            elif kind == "tool_call":
+                st.caption(
+                    f"🛠️ {ev.get('tool', 'tool')} "
+                    f"({json.dumps(ev.get('args', {}), ensure_ascii=False)[:200]}) · {ts}"
+                )
+
             elif kind == "tool_result":
-                st.markdown(f"↳ **result**  ·  {ts}")
-                st.code(str(ev.get("result", "")), language=None)
+                st.caption(
+                    f"↳ {ev.get('tool', 'tool')}: "
+                    f"{str(ev.get('result', ''))[:300]} · {ts}"
+                )
+
             elif kind == "approval_requested":
-                st.markdown(f"🛑 **approval needed**  ·  {ts}")
-                st.code(str(ev.get("command", "")), language=None)
+                st.warning(
+                    f"Approval needed for {ev.get('tool', 'a tool')}: "
+                    f"{str(ev.get('command', ev.get('args', '')))[:200]}"
+                )
+
             elif kind == "approval_granted":
-                st.markdown(f"✅ **approved ({ev.get('scope','?')})**  ·  {ts}")
+                st.caption(f"✅ approved {ev.get('tool', '')} · {ts}")
+
             elif kind == "approval_denied":
-                st.markdown(f"❌ **denied**  ·  {ts}")
-                if ev.get("reason"):
-                    st.caption(ev.get("reason"))
-            st.divider()
+                st.caption(f"🚫 denied {ev.get('tool', '')} · {ts}")
 
-    # Auto-rerun to poll the log.
-    time.sleep(POLL_SECS)
-    st.rerun()
+            elif kind == "session_start":
+                st.caption(
+                    f"▶ session started · LLM `{ev.get('llm')}` @ `{ev.get('base_url')}` · "
+                    f"ASR `{ev.get('asr')}` · {ev.get('tools')} tools · {ts}"
+                )
 
+            elif kind == "session_end":
+                st.caption(f"■ session ended · {ts}")
 
-if __name__ == "__main__":
-    main()
+            elif kind == "user_started":
+                st.caption(f"🎤 listening… · {ts}")
+
+            elif kind == "bot_started":
+                st.caption(f"🔊 speaking… · {ts}")
+
+        st.caption(f"{len(events)} events · refreshes every second")
+
+    render_log()

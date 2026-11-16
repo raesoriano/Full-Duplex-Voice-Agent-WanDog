@@ -32,10 +32,14 @@ PIPER_VOICE = os.environ.get("FWEDDIE_PIPER_VOICE", "en_US-lessac-medium")
 # ---------------------------------------------------------------------------
 # Audio
 # ---------------------------------------------------------------------------
-# The USB capture card on the Pi only accepts 48 kHz for capture
-# (16/8/32 kHz fail). Capture at 48 kHz; VAD/ASR run at 16 kHz.
+# The USB audio devices on this Pi only accept 48 kHz -- for BOTH capture
+# and playback. Every other rate we tried (8k/16k/22.05k/32k/44.1k/96k)
+# fails with "Errno -9997 Invalid sample rate", so we always open the
+# hardware at 48 kHz and convert in software where a lower rate is needed
+# (ASR/VAD want 16 kHz; Piper TTS emits 22.05 kHz and gets resampled up by
+# the output transport).
 INPUT_SAMPLE_RATE = int(os.environ.get("FWEDDIE_IN_RATE", 48000))
-OUTPUT_SAMPLE_RATE = int(os.environ.get("FWEDDIE_OUT_RATE", 24000))
+OUTPUT_SAMPLE_RATE = int(os.environ.get("FWEDDIE_OUT_RATE", 48000))
 
 # PyAudio device indices. Pinned by default to the two USB devices on the Pi:
 #   index 0 = "USB PnP Audio Device"   (hw:2,0) -- the MIC (verified: it is the
@@ -52,6 +56,12 @@ def _device_index(env: str, default: int) -> int | None:
 
 
 INPUT_DEVICE_INDEX = _device_index("FWEDDIE_IN_DEVICE", 0)
+# ALSA card number for the capture device, used to set the mic gain at
+# startup. PortAudio index 0 == ALSA card 2 on this Pi. The card boots at
+# 34% capture gain (167/496), which is quiet enough that Silero scores
+# speech at ~0.05 confidence and the agent appears deaf; at 100% (496) the
+# same speech scores ~0.47. Set FWEDDIE_MIC_CARD="" to skip the adjustment.
+MIC_CARD = os.environ.get("FWEDDIE_MIC_CARD", "2")
 OUTPUT_DEVICE_INDEX = _device_index("FWEDDIE_OUT_DEVICE", 1)
 
 # ---------------------------------------------------------------------------
@@ -71,21 +81,31 @@ ASR_SAMPLE_RATE = 16000
 # ---------------------------------------------------------------------------
 # VAD (Silero ONNX via onnxruntime -- no torch)
 # ---------------------------------------------------------------------------
-VAD_CONFIDENCE = float(os.environ.get("FWEDDIE_VAD_CONFIDENCE", 0.7))
-VAD_START_SECS = float(os.environ.get("FWEDDIE_VAD_START", 0.2))
+# Tuned for this Pi's far-field USB mic. Measured on real capture,
+# Silero confidence peaks around 0.45-0.47 for speech a metre away,
+# so the stock 0.7 never fires. The same audio scores 1.00 when
+# close-mic, so this is sensitivity, not a broken VAD.
+VAD_CONFIDENCE = float(os.environ.get("FWEDDIE_VAD_CONFIDENCE", 0.35))
+VAD_START_SECS = float(os.environ.get("FWEDDIE_VAD_START", 0.15))
 VAD_STOP_SECS = float(os.environ.get("FWEDDIE_VAD_STOP", 0.8))
 # Pipecat 1.15 measures volume on a 0.0–1.0 scale (BS.1770 loudness), not the
 # old int16 amplitude. A value like 400 (the pre-1.15 default) makes
 # `volume >= min_volume` always False, so VAD never fires and barge-in dies.
-VAD_MIN_VOLUME = float(os.environ.get("FWEDDIE_VAD_MIN_VOLUME", 0.6))
+# Far-field speech volume on this mic peaks ~0.75, so 0.6 sat too
+# close to the ceiling; 0.35 leaves headroom and still gates hum.
+VAD_MIN_VOLUME = float(os.environ.get("FWEDDIE_VAD_MIN_VOLUME", 0.35))
 
 # ---------------------------------------------------------------------------
 # LLM (OpenAI-compatible endpoint -- OnIt's DGX cluster)
 # ---------------------------------------------------------------------------
-# The DGX cluster serves Qwen3.8-27B through vLLM with an OpenAI-compatible
-# API. Ollama's free cloud models (e.g. gemma4:31b-cloud) are no longer
-# available, so the default is the on-prem DGX model.
-LLM_BASE_URL = os.environ.get("ONIT_LLM_BASE_URL", "http://202.92.159.240:8001/v1")
+# Default is the Ollama cloud OpenAI-compatible API (DGX cluster is down).
+# The /v1 suffix is REQUIRED: pipecat POSTs to {base_url}/chat/completions and
+# Ollama only serves that route under /v1. Without it you get a 404 (not a
+# 401), which looks like a bad model name but is a bad path.
+#   https://ollama.com/v1        <- canonical, works (200)
+#   https://api.ollama.com/v1    <- 301-redirects to ollama.com/v1
+#   https://api.ollama.com       <- 301 -> 404, the original failure
+LLM_BASE_URL = os.environ.get("ONIT_LLM_BASE_URL", "https://ollama.com/v1")
 LLM_MODEL = os.environ.get("ONIT_LLM_MODEL", "gemma4:31b-cloud")
 LLM_TEMPERATURE = float(os.environ.get("ONIT_LLM_TEMPERATURE", 0.7))
 LLM_MAX_TOKENS = int(os.environ.get("ONIT_LLM_MAX_TOKENS", 300))

@@ -2,7 +2,7 @@
 
 Covers:
   1. EventBus.emit appends JSONL events and keeps an in-memory ring.
-  2. The dashboard's log reader (_read_events) picks up new events and skips
+  2. The dashboard's log reader (read_events) picks up new events and skips
      a half-written last line.
   3. The file-based approval handshake: agent writes <log>.pending.json,
      "dashboard" writes <log>.decision.json, agent reads + consumes it.
@@ -51,8 +51,8 @@ def test_emit_and_read() -> None:
     # Point the dashboard at our temp log.
     from pathlib import Path
     dashboard.LOG_PATH = Path(log)
-    events = dashboard._read_events(0)
-    kinds = [e[1]["kind"] for e in events]
+    events = dashboard.read_events(0)
+    kinds = [e["kind"] for e in events]
     assert kinds == ["session_start", "user_text", "bot_text"], kinds
     assert len(bus.recent()) == 3
     print("1. emit + dashboard read OK")
@@ -70,9 +70,9 @@ def test_half_written_line() -> None:
         encoding="utf-8",
     )
     dashboard.LOG_PATH = p
-    events = dashboard._read_events(0)
+    events = dashboard.read_events(0)
     assert len(events) == 1, events  # only the complete line
-    assert events[0][1]["kind"] == "user_text"
+    assert events[0]["kind"] == "user_text"
     print("2. half-written line skipped OK")
 
 

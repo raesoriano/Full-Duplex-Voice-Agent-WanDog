@@ -23,8 +23,11 @@ from pathlib import Path
 import pyaudio
 from loguru import logger
 
+import json
+
 import config
 import mcp_bridge
+from resample import AudioResampleProcessor
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
@@ -33,6 +36,8 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     LLMTextFrame,
+    StartFrame,
+    STTMuteFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -48,6 +53,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.turns.user_start.vad_user_turn_start_strategy import VADUserTurnStartStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.piper.tts import PiperTTSService
@@ -60,6 +66,58 @@ from pipecat.transports.local.audio import (
 from pipecat.workers.runner import WorkerRunner
 
 logging.basicConfig(level=logging.INFO)
+
+
+class MicControlWatcher(FrameProcessor):
+    """Honour the dashboard's mic toggle.
+
+    The dashboard writes ``<log>.mic_control.json`` with ``{"enabled": bool}``.
+    Nothing used to read that file, so the toggle was decorative. This
+    processor polls it and, on change, pushes an ``STTMuteFrame`` upstream so
+    the ASR stops transcribing. Muting the ASR (rather than dropping audio)
+    keeps VAD and barge-in behaviour intact and is the officially supported
+    way to stop a Pipecat STT service.
+    """
+
+    def __init__(self, control_path: str, poll_secs: float = 0.5, **kwargs):
+        super().__init__(**kwargs)
+        self._path = Path(control_path)
+        self._poll = poll_secs
+        self._last: bool | None = None
+        self._task: asyncio.Task | None = None
+
+    def _read(self) -> bool:
+        """True = mic enabled. Missing/corrupt file means enabled."""
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            return bool(data.get("enabled", True))
+        except Exception:
+            return True
+
+    async def _watch(self):
+        while True:
+            enabled = self._read()
+            if enabled != self._last:
+                if self._last is not None:
+                    logger.info("Mic {}", "enabled" if enabled else "muted")
+                    # Upstream: the STT sits before us in the pipeline.
+                    await self.push_frame(
+                        STTMuteFrame(mute=not enabled), FrameDirection.UPSTREAM
+                    )
+                self._last = enabled
+            await asyncio.sleep(self._poll)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, StartFrame) and self._task is None:
+            self._task = asyncio.create_task(self._watch())
+        await self.push_frame(frame, direction)
+
+    async def cleanup(self):
+        if self._task is not None:
+            self._task.cancel()
+            self._task = None
+        await super().cleanup()
 
 
 class FweddieLogger(FrameProcessor):
@@ -118,6 +176,34 @@ class FweddieLogger(FrameProcessor):
             logger.error("[error] {}", frame.error)
 
 
+def maximise_mic_gain() -> None:
+    """Set the USB mic's capture gain to 100% before the stream opens.
+
+    The card comes up at 34% (167/496) after boot. At that gain Silero scores
+    real speech at ~0.05 confidence, so the agent looks deaf; at 100% (496)
+    the same speech reaches ~0.47. Best-effort: if amixer is missing or the
+    card number is wrong we log and carry on rather than refusing to start.
+    """
+    if not config.MIC_CARD:
+        return
+    try:
+        import subprocess
+
+        for ctl in ("Mic", "Mic Capture"):
+            r = subprocess.run(
+                ["amixer", "-c", config.MIC_CARD, "sset", ctl, "100%", "cap"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0:
+                logger.info("  Mic gain: set {} on card {} to 100%",
+                            ctl, config.MIC_CARD)
+                return
+        logger.warning("Could not set mic gain on card {} (amixer rc != 0)",
+                       config.MIC_CARD)
+    except Exception as e:  # noqa: BLE001 -- never block startup on this
+        logger.warning("Could not set mic gain: {}", e)
+
+
 def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None" = None,
                    bus=None):
     """Construct the Pipecat pipeline.
@@ -129,14 +215,19 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     """
 
     # --- Audio transport (mic + speaker) -----------------------------------
+    maximise_mic_gain()
     pa = pyaudio.PyAudio()
-    # When ASR is on, the mic captures at 16 kHz (what faster-whisper wants)
-    # instead of the 48 kHz the capture card natively produces. Output stays
-    # at the TTS rate. This must be set BEFORE the transports are built.
-    in_rate = config.ASR_SAMPLE_RATE if config.ASR_ENABLED else config.INPUT_SAMPLE_RATE
+    # The mic is ALWAYS captured at the hardware rate (48 kHz). This card
+    # accepts no other capture rate -- 8k/16k/22.05k/32k/44.1k/96k all fail
+    # with "Errno -9997 Invalid sample rate". We therefore capture at 48 kHz
+    # and convert down to what VAD and ASR need (16 kHz) in the pipeline,
+    # using AudioResampleProcessor right after the input transport.
+    capture_rate = config.INPUT_SAMPLE_RATE
+    # Everything downstream of the resampler sees this rate.
+    proc_rate = config.ASR_SAMPLE_RATE if config.ASR_ENABLED else capture_rate
     transport_params = LocalAudioTransportParams(
         audio_in_enabled=True,
-        audio_in_sample_rate=in_rate,
+        audio_in_sample_rate=capture_rate,
         audio_in_channels=1,
         audio_out_enabled=True,
         audio_out_sample_rate=config.OUTPUT_SAMPLE_RATE,
@@ -155,10 +246,11 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     # The analyzer is handed to the LLM user aggregator (below), whose
     # internal UserTurnController + VADUserTurnStartStrategy turn "user
     # started speaking" into an InterruptionFrame that stops the bot's TTS.
-    # The analyzer must run at the mic's capture rate (in_rate), which is the
-    # rate of the InputAudioRawFrames it will see in the pipeline.
+    # The analyzer must run at the rate of the InputAudioRawFrames it will
+    # actually see, which is AFTER the resampler (16 kHz when ASR is on).
+    # Silero rejects anything but 8000/16000, so this is not optional.
     vad_analyzer = SileroVADAnalyzer(
-        sample_rate=in_rate,
+        sample_rate=proc_rate,
         params=VADParams(
             confidence=config.VAD_CONFIDENCE,
             start_secs=config.VAD_START_SECS,
@@ -246,18 +338,32 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         )
 
     # --- Pipeline ------------------------------------------------------------
-    # mic -> ASR -> user agg (VAD + barge-in) -> LLM -> [assistant agg] -> TTS.
-    # The user aggregator sits after ASR so it sees the user's audio (for VAD)
-    # and the transcript (for context) and pushes the LLMContextFrame to the
-    # LLM. When ASR is off the LLM takes raw audio directly (original path).
-    stages = [input_transport]
+    # mic -> resample -> ASR -> user agg (VAD + barge-in) -> LLM -> [assistant
+    # agg] -> TTS. The user aggregator sits after ASR so it sees the user's
+    # audio (for VAD) and the transcript (for context) and pushes the
+    # LLMContextFrame to the LLM. When ASR is off the LLM takes raw audio.
+    # VAD MUST run before the STT. SegmentedSTTService only transcribes when it
+    # receives VADUserStoppedSpeakingFrame, and its process_frame() swallows
+    # both VAD frames without pushing them downstream. With the VAD living
+    # only in the user aggregator (downstream of the STT), the STT waited
+    # forever for a stop frame that could never arrive -- so Whisper never
+    # flushed a segment and the agent appeared completely deaf. VADProcessor
+    # broadcasts its frames to every processor, so the STT and the aggregator
+    # both receive them.
+    stages = [
+        input_transport,
+        AudioResampleProcessor(capture_rate, proc_rate),
+        VADProcessor(vad_analyzer=vad_analyzer),
+    ]
     if stt is not None:
         stages.append(stt)
     stages.append(user_agg)
     stages.append(llm)
     if assistant_agg is not None:
         stages.append(assistant_agg)
-    stages += [tts, output_transport, FweddieLogger(bus)]
+    stages += [tts, output_transport,
+               MicControlWatcher(str(Path(config.DASHBOARD_LOG).with_suffix(".mic_control.json"))),
+               FweddieLogger(bus)]
     pipeline = Pipeline(stages)
     task = PipelineTask(pipeline)
 
@@ -320,11 +426,17 @@ async def run() -> None:
     runner = WorkerRunner()
     await runner.add_workers(task)
 
-    # The task's start flows a StartFrame through the pipeline, bringing up
-    # both transports. Block until the user hits Ctrl+C.
+    # runner.run() is what actually STARTS the registered workers. Adding a
+    # worker only attaches it to the bus and registry; nothing is started
+    # until run() is entered (see WorkerRunner.add_workers docstring). This
+    # was missing, so the pipeline never started: no StartFrame, the input
+    # transport never opened the mic, VAD never ran, ASR never transcribed,
+    # and the dashboard only ever saw session_start.
+    #
+    # auto_end=False keeps the runner alive until we cancel it, instead of
+    # exiting the moment the single pipeline worker finishes.
     try:
-        while True:
-            await asyncio.sleep(1)
+        await runner.run(auto_end=False)
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.info("Shutting down...")
     finally:
