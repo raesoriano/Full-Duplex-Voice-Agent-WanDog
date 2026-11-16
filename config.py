@@ -86,7 +86,7 @@ VAD_MIN_VOLUME = float(os.environ.get("FWEDDIE_VAD_MIN_VOLUME", 0.6))
 # API. Ollama's free cloud models (e.g. gemma4:31b-cloud) are no longer
 # available, so the default is the on-prem DGX model.
 LLM_BASE_URL = os.environ.get("ONIT_LLM_BASE_URL", "http://202.92.159.240:8001/v1")
-LLM_MODEL = os.environ.get("ONIT_LLM_MODEL", "gemma4")
+LLM_MODEL = os.environ.get("ONIT_LLM_MODEL", "gemma4:31b-cloud")
 LLM_TEMPERATURE = float(os.environ.get("ONIT_LLM_TEMPERATURE", 0.7))
 LLM_MAX_TOKENS = int(os.environ.get("ONIT_LLM_MAX_TOKENS", 300))
 # Qwen3.8 is a thinking model: by default it spends its token budget on
