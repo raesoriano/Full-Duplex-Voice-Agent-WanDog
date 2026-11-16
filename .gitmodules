@@ -1,0 +1,3 @@
+[submodule "fd-benchmark"]
+	path = fd-benchmark
+	url = https://github.com/trueshotjames/ai231-me3-full-duplex-benchmarking.git

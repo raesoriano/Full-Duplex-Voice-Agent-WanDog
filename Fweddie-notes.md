@@ -96,10 +96,18 @@ address.)
 ## 5. How to run
 ```bash
 cd /home/raesoriano/sandbox/Fweddie-repo
+
+# One-time: the streaming ASR model (321 MB, gitignored)
+cd models
+curl -LO https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2
+tar xf sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2
+cd ..
+
 export ONIT_LLM_API_KEY=sk-...        # or rely on keychain / OPENAI_API_KEY
 .venv/bin/python agent.py
 ```
-Stop with **Ctrl+C**.
+Stop with **Ctrl+C**. Skip the download with `FWEDDIE_ASR_BACKEND=whisper`
+(segmented, slower, no 321 MB).
 
 ## 6. Dependency notes (torch-free)
 - **No torch.** Silero VAD runs through `onnxruntime` (CPU). The `silero`
@@ -160,23 +168,49 @@ Verified end-to-end against the real OnIt server:
 `test_guard.py` covers the Guard's logic (allow-through, redeem once/session,
 refuse + remember, prose passthrough) with a stubbed tool call.
 
-## 8. ASR (local, faster-whisper)
+## 8. ASR (streaming, 2026-11-17)
 
-The agent now runs a real ASR stage instead of feeding raw audio to the LLM:
+    mic(48k) -> VAD(Silero) -> ASR(streaming zipformer partials + whisper tiny.en final) -> LLM(text) -> TTS -> speaker
 
-    mic(48k) -> VAD(Silero) -> ASR(faster-whisper small, 16k) -> LLM(text) -> TTS -> speaker
+**Why it changed.** The old path was segmented: `WhisperSTTService` buffered the
+whole utterance and only started transcribing after the VAD reported the user
+stopped. `small` int8 takes ~4.9 s per segment on this Pi, and it processed
+segments sequentially, so turn 2's words arrived ~7.3 s after the user stopped
+talking -- long after that turn had closed. The LLM then answered whatever it
+had, which was the previous question.
 
-- `WhisperSTTService` (Pipecat) with the `small` model, `int8` compute, `en`.
-  The model is already cached under `~/.cache/huggingface`, so **no download and
-  no API key**.
-- The mic captures at **16 kHz** when ASR is on (faster-whisper wants 16k), not
-  the 48 kHz the capture card natively produces. Output stays at the TTS rate.
-- Knobs in `config.py`: `FWEDDIE_ASR` (on/off), `FWEDDIE_ASR_MODEL`,
-  `FWEDDIE_ASR_DEVICE`, `FWEDDIE_ASR_COMPUTE`, `FWEDDIE_ASR_LANGUAGE`.
-  `FWEDDIE_ASR=0` restores the original raw-audio-to-LLM path.
-- The ASR stage emits `TranscriptionFrame`; the LLM streams its reply as
-  `LLMTextFrame` chunks. `FweddieLogger` buffers the reply and emits one
-  `bot_text` event per turn (see section 9).
+**Now** (`streaming_asr.py`, `SherpaStreamingSTTService`):
+
+| measurement | before | now |
+|---|---|---|
+| first partial word after speech start | never | 0.4-0.7 s |
+| final transcript after speech end | 4.7-4.9 s | 0.86 s |
+| VAD stop -> turn submitted to the LLM | 5.2 s | 0.93 s |
+
+- **zipformer streaming** (sherpa-onnx, int8, RTF ~0.10) decodes 20 ms chunks as
+  they arrive and emits `InterimTranscriptionFrame` continuously. It is fast but
+  weak on numbers (`"2 plus 2"` -> `"TOO PLUS"`), so it is not the final word.
+- **faster-whisper `tiny.en`** re-transcribes the same buffered audio for the
+  authoritative `TranscriptionFrame`. `tiny.en` is 0.86 s and word-perfect on the
+  test captures; `base.en` is 1.6 s and `small.en` 4.9 s for no gain on short
+  turns. The final pass is **skipped when the streaming model found no words** --
+  otherwise Whisper hallucinated a full sentence (`"Well did I not? What's in the
+  nog?"`) out of a silent segment and put it in the prompt as if the user said it.
+- Model weights: 321 MB, downloaded into `models/` (gitignored). The service
+  raises a `FileNotFoundError` naming the exact `curl` command when missing.
+  `FWEDDIE_ASR_BACKEND=whisper` restores the old segmented path with no download.
+- Knobs: `FWEDDIE_ASR_BACKEND`, `FWEDDIE_ASR_FINAL`, `FWEDDIE_ASR_FINAL_MODEL`,
+  `FWEDDIE_ASR_PREROLL` (1.0 s kept from before the VAD fires, so the decoder does
+  not start mid-word), `FWEDDIE_ASR_THREADS` (2 -- the Pi also runs VAD, the LLM
+  client and Piper), `FWEDDIE_TURN_STOP` (0.6 s speech-timeout).
+- **Rejected:** the 20M zipformer returned empty strings on this mic's audio. The
+  2023-06-26 model works on every capture. `WhisperSTTService`'s segmented
+  default remains available for A/B.
+
+**The regression this introduced and its fix.** The tap that publishes the live
+draft line overrode `FrameProcessor.process_frame` without calling `super()`,
+which skipped `StartFrame` handling and stalled the pipeline behind it -- the
+transcript decoded but never reached `LLMUserAggregator`. See section 12(b).
 
 ## 9. Dashboard (Streamlit, LAN-reachable)
 
@@ -249,6 +283,54 @@ by default and passes them to `LocalAudioTransportParams`. Override with
   exactly as `agent.py` does (keychain key, thinking off) and gets a real
   reply from the DGX model.
 
+## 12. Turn handling & the silent-agent regression (fixed 2026-11-17)
+
+Three separate faults produced what looked like one symptom ("it answers the
+previous question, or not at all"). They are worth keeping straight, because
+each one masked the next.
+
+**a) The LLM never saw its own answers.** `LLMUserAggregator` and
+`LLMAssistantAggregator` were each given their own `LLMContext`. Only the user
+half pushes `LLMContextFrame`, and that frame carries `user_agg._context` --
+that object *is* the prompt. The assistant half wrote replies into a context
+nothing ever sent, so every prompt was a growing stack of unanswered `user`
+messages with no `assistant` turns, and the model picked whichever it liked.
+Every `Generating LLM response` line in the log showed `messages=2/3/4` with
+roles `[system, developer]`, `[system, developer, user]` -- never a completed
+exchange. **Fix:** one shared `LLMContext`. Prompt 2 is now
+`[system, user, assistant, user]`.
+
+**b) The partial-transcript tap stalled the pipeline.** The tap added to publish
+the live draft overrode `FrameProcessor.process_frame` without calling
+`super()`. That base method handles `StartFrame` -- it marks the stage started,
+which is what lets the pipeline become ready -- plus `CancelFrame` and
+`InterruptionFrame`. Skipping it left the handshake stalled behind that stage,
+so every later frame queued behind it, including the final
+`TranscriptionFrame`. The words decoded and appeared in the terminal, then
+vanished. The aggregator saw an empty aggregation and asked the user to repeat.
+**Fix:** call `super()`. `test_tap_forward.py` hangs before, forwards now;
+`test_endtoend_answer.py` drives the real pipeline and fails unless `bot_text`
+appears.
+
+**c) The turn inactivity ceiling was too short.** It had been lowered to 3.0 s
+(Pipecat's default is 5.0). It is an inactivity ceiling, not a transcription
+deadline, and 3.0 s sits right at the length of a spoken question -- a 3.5 s
+question was force-closed 31 ms *before* the VAD stop and landed on the same
+empty-turn path. **Fix:** reverted to 5.0 s, with the 0.6 s
+`SpeechTimeoutUserTurnStopStrategy` doing the real turn closing.
+
+**Why the tests passed while the live agent failed:** `test_pipeline_asr.py`
+used 1.4 s and 1.8 s clips -- shorter than the 3 s timeout -- never included the
+tap, and never checked for a reply. It now covers 3.5 s and 5.6 s, and
+`test_endtoend_answer.py` asserts on the spoken answer.
+
+**Mic gain.** `maximise_mic_gain()` used to run unconditionally from
+`build_pipeline()` and force the capture card to 496/496 (+31 dB) on every
+start. At that level the mic clips on speech and Silero scores the keyboard and
+the speaker's own output as speech. It is now `report_mic_gain()`: it reads the
+level with `amixer ... sget` and logs it, and changes nothing. Set the gain
+yourself; the agent leaves it alone.
+
 ## 13. Barge-in (fixed 2026-11-10)
 
 Barge-in — the bot stops talking the instant you start speaking — was **broken
@@ -289,10 +371,17 @@ barge-in even with the wiring. **Fix:** `VAD_MIN_VOLUME` is now a float, default
    the path above.
 
 ## 14. Open questions / next steps
+- [x] **Streaming ASR** — text appears while the user is still talking; see
+      section 8.
+- [x] **Silent agent / previous-question turns** — see section 12.
+- [x] **Mic gain reset** — the agent no longer forces 100%; it only reports.
 - [ ] **Live mic test on the Pi** — confirm capture card, speaker out, and
       barge-in feel. (Can't be done in this sandbox — no real audio device.)
       No `export` needed: the key is in the OS keychain, so just
       `.venv/bin/python agent.py`.
+- [ ] Numbers in the streaming partials (`"2 plus 2"` → `"TOO PLUS"`). The final
+      transcript is correct because Whisper produces it, but the live draft can
+      show the wrong digits mid-sentence.
 - [ ] Add **music** (YouTube download + playback) as an OnIt tool.
 - [ ] Tune VAD thresholds (`confidence`, `stop_secs`) and TTS volume for the room.
 - [ ] Decide on a wake word / "always listening" policy.
