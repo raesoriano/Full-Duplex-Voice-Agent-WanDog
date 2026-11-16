@@ -52,10 +52,11 @@ def report_gain() -> None:
         )
         line = [ln for ln in r.stdout.splitlines() if "Capture" in ln or "Mono:" in ln]
         print(f"   card {config.MIC_CARD}: " + (" | ".join(s.strip() for s in line) or "no data"))
-        if "100%" not in r.stdout:
-            print("   WARNING: gain is not at 100%. The agent sets it at startup,")
-            print("            but if you run this tool directly, set it yourself:")
-            print(f"            amixer -c {config.MIC_CARD} sset Mic 100% cap")
+        if "100%" in r.stdout:
+            print("   NOTE: gain is at 100%. That is the maximum and it clips on")
+            print("         speech (peak > 1.0), so the keyboard and the speaker")
+            print("         get scored as speech. Consider 60-75%:")
+            print(f"            amixer -c {config.MIC_CARD} sset Mic 70% cap")
     except Exception as e:  # noqa: BLE001
         print(f"   could not read gain: {e}")
 

@@ -202,13 +202,16 @@ def wire_transcript_events(user_agg, assistant_agg, bus) -> None:
                 await bus.emit("bot_text", text=text)
 
 
-def maximise_mic_gain() -> None:
-    """Set the USB mic's capture gain to 100% before the stream opens.
+def report_mic_gain() -> None:
+    """Log the mic's current capture gain. Read-only -- never changes it.
 
-    The card comes up at 34% (167/496) after boot. At that gain Silero scores
-    real speech at ~0.05 confidence, so the agent looks deaf; at 100% (496)
-    the same speech reaches ~0.47. Best-effort: if amixer is missing or the
-    card number is wrong we log and carry on rather than refusing to start.
+    The gain is deliberately NOT set by the agent: it is a property of the
+    room and the user's distance from the mic, so it belongs to the person
+    sitting in front of it. 100% was too hot for this desk -- it clipped on
+    speech (peak 1.02) and let Silero score the keyboard and the speaker's
+    own output as speech. Set it yourself and it stays:
+
+        amixer -c 2 sset Mic 70% cap
     """
     if not config.MIC_CARD:
         return
@@ -217,17 +220,23 @@ def maximise_mic_gain() -> None:
 
         for ctl in ("Mic", "Mic Capture"):
             r = subprocess.run(
-                ["amixer", "-c", config.MIC_CARD, "sset", ctl, "100%", "cap"],
+                ["amixer", "-c", config.MIC_CARD, "sget", ctl],
                 capture_output=True, text=True, timeout=5,
             )
-            if r.returncode == 0:
-                logger.info("  Mic gain: set {} on card {} to 100%",
-                            ctl, config.MIC_CARD)
-                return
-        logger.warning("Could not set mic gain on card {} (amixer rc != 0)",
-                       config.MIC_CARD)
+            if r.returncode != 0:
+                continue
+            # The level line is the one carrying "[N%]"; "Capture channels"
+            # and "Limits" also match on "Capture" but carry no level.
+            line = next(
+                (ln.strip() for ln in r.stdout.splitlines() if "[" in ln and "%]" in ln),
+                "",
+            )
+            logger.info("  Mic gain (unchanged): {} card {}: {}",
+                        ctl, config.MIC_CARD, line or "no level reported")
+            return
+        logger.debug("Could not read mic gain on card {}", config.MIC_CARD)
     except Exception as e:  # noqa: BLE001 -- never block startup on this
-        logger.warning("Could not set mic gain: {}", e)
+        logger.debug("Could not read mic gain: {}", e)
 
 
 def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None" = None,
@@ -241,7 +250,8 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     """
 
     # --- Audio transport (mic + speaker) -----------------------------------
-    maximise_mic_gain()
+    # Read-only: the agent must never touch the mic gain (see report_mic_gain).
+    report_mic_gain()
     pa = pyaudio.PyAudio()
     # The mic is ALWAYS captured at the hardware rate (48 kHz). This card
     # accepts no other capture rate -- 8k/16k/22.05k/32k/44.1k/96k all fail

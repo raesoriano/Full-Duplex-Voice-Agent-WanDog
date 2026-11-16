@@ -56,11 +56,17 @@ def _device_index(env: str, default: int) -> int | None:
 
 
 INPUT_DEVICE_INDEX = _device_index("FWEDDIE_IN_DEVICE", 0)
-# ALSA card number for the capture device, used to set the mic gain at
-# startup. PortAudio index 0 == ALSA card 2 on this Pi. The card boots at
-# 34% capture gain (167/496), which is quiet enough that Silero scores
-# speech at ~0.05 confidence and the agent appears deaf; at 100% (496) the
-# same speech scores ~0.47. Set FWEDDIE_MIC_CARD="" to skip the adjustment.
+# ALSA card number for the capture device. PortAudio index 0 == ALSA card 2
+# on this Pi. Used only to READ and report the current gain at startup --
+# the agent never writes it. The gain is yours to set, because it depends on
+# the room and how close you sit:
+#
+#     amixer -c 2 sset Mic 70% cap
+#
+# (34% is too quiet -- Silero scores real speech at ~0.05 and the agent looks
+# deaf. 100% is too hot -- it clips on speech and picks up the keyboard and
+# the speaker's own output. Somewhere in the middle is the sweet spot.)
+# Set FWEDDIE_MIC_CARD="" to skip even the read.
 MIC_CARD = os.environ.get("FWEDDIE_MIC_CARD", "2")
 OUTPUT_DEVICE_INDEX = _device_index("FWEDDIE_OUT_DEVICE", 1)
 
