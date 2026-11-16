@@ -124,56 +124,82 @@ class FweddieLogger(FrameProcessor):
     """Observer that prints what the agent hears and says, and records it to
     the event bus so the dashboard can show the interaction live.
 
-    The LLM streams its reply as many small ``LLMTextFrame`` chunks; we buffer
-    them and emit one ``bot_text`` event per reply (when the bot stops
-    speaking), so the dashboard shows a whole sentence, not fragments.
+    Why this is split in two
+    ------------------------
+    The user's words and the bot's words are NOT available as frames by the
+    time any observer at the end of the pipeline could see them:
+
+      * ``TranscriptionFrame`` is consumed by ``LLMUserAggregator``
+        (``_handle_transcription``) and never pushed downstream;
+      * ``LLMTextFrame`` is consumed by ``LLMAssistantAggregator``, whose
+        ``process_frame`` has no TextFrame branch and therefore never pushes it.
+
+    An earlier version of this class listened for exactly those two frame types
+    from the tail of the pipeline, so ``user_text`` and ``bot_text`` were never
+    emitted and the dashboard chat stayed empty no matter what was said. That is
+    what the transcript events below fix: they come from the aggregators' own
+    event handlers (``on_user_turn_message_added`` and
+    ``on_assistant_turn_stopped``), which fire with the finished text.
+
+    The frame half still handles what genuinely IS broadcast -- the speaking
+    start/stop frames -- so the dashboard can show a live "listening" /
+    "speaking" caption.
     """
 
     def __init__(self, bus=None):
         super().__init__()
         self.bus = bus
-        self._bot_buf: list[str] = []
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await self.push_frame(frame, direction)
 
         if isinstance(frame, UserStartedSpeakingFrame):
-            logger.info("[user] started speaking")
+            logger.info(" started speaking")
             if self.bus is not None:
                 await self.bus.emit("user_started")
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            logger.info("[user] stopped speaking")
+            logger.info(" stopped speaking")
             if self.bus is not None:
                 await self.bus.emit("user_stopped")
         elif isinstance(frame, BotStartedSpeakingFrame):
-            logger.info("[fweddie] started speaking")
-            self._bot_buf = []
+            logger.info(" started speaking")
             if self.bus is not None:
                 await self.bus.emit("bot_started")
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            logger.info("[fweddie] stopped speaking")
-            text = "".join(self._bot_buf).strip()
-            self._bot_buf = []
-            if text:
-                logger.info("[fweddie] {}", text)
-                if self.bus is not None:
-                    await self.bus.emit("bot_text", text=text)
+            logger.info(" stopped speaking")
             if self.bus is not None:
                 await self.bus.emit("bot_stopped")
-        elif isinstance(frame, TranscriptionFrame):
-            # The ASR stage emits the user's words here.
-            text = (frame.text or "").strip()
-            if text:
-                logger.info("[user] {}", text)
-                if self.bus is not None:
-                    await self.bus.emit("user_text", text=text)
-        elif isinstance(frame, LLMTextFrame):
-            # Streamed bot reply chunk -- buffer it for the bot_text event.
-            self._bot_buf.append(frame.text or "")
-        elif isinstance(frame, LLMTextFrame):
-            logger.info("[llm] {}", frame.text)
         elif isinstance(frame, ErrorFrame):
-            logger.error("[error] {}", frame.error)
+            logger.error(" {}", frame.error)
+
+
+def wire_transcript_events(user_agg, assistant_agg, bus) -> None:
+    """Record the user's words and the bot's reply on the event bus.
+
+    These two texts exist only inside the aggregators (see ``FweddieLogger``),
+    so we subscribe to the events they emit when a turn completes rather than
+    trying to catch a frame that is never pushed downstream.
+    """
+    if bus is None:
+        return
+
+    if user_agg is not None:
+
+        @user_agg.event_handler("on_user_turn_message_added")
+        async def _on_user_turn_message_added(aggregator, message):
+            text = (getattr(message, "content", "") or "").strip()
+            if text:
+                logger.info(" {}", text)
+                await bus.emit("user_text", text=text)
+
+    if assistant_agg is not None:
+
+        @assistant_agg.event_handler("on_assistant_turn_stopped")
+        async def _on_assistant_turn_stopped(aggregator, message):
+            text = (getattr(message, "content", "") or "").strip()
+            if text:
+                logger.info(" {}", text)
+                await bus.emit("bot_text", text=text)
 
 
 def maximise_mic_gain() -> None:
@@ -323,19 +349,20 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         params=user_params,
     )
 
-    # The assistant aggregator records the bot's replies into the same context.
-    # It is only needed when there is a context to record into (tools present);
-    # without it the bot still talks, it just has no multi-turn memory.
-    assistant_agg = None
+    # The assistant aggregator records the bot's replies into the context. It is
+    # also the ONLY place the bot's finished reply text is available (it
+    # consumes LLMTextFrame), so the dashboard's bot_text event comes from it.
+    # It is therefore always built, not just when tools are present.
+    context_kwargs = {"messages": [{"role": "system", "content": system_prompt}]}
     if bridge is not None and bridge.tools:
-        context = LLMContext(
-            messages=[{"role": "system", "content": system_prompt}],
-            tools=bridge.tools,
-        )
-        assistant_agg = LLMAssistantAggregator(
-            context,
-            params=LLMAssistantAggregatorParams(),
-        )
+        context_kwargs["tools"] = bridge.tools
+    context = LLMContext(**context_kwargs)
+    assistant_agg = LLMAssistantAggregator(
+        context,
+        params=LLMAssistantAggregatorParams(),
+    )
+    # Hook the transcript events before the pipeline runs so no turn is missed.
+    wire_transcript_events(user_agg, assistant_agg, bus)
 
     # --- Pipeline ------------------------------------------------------------
     # mic -> resample -> ASR -> user agg (VAD + barge-in) -> LLM -> [assistant
@@ -357,13 +384,26 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     ]
     if stt is not None:
         stages.append(stt)
+    # The mic toggle pushes STTMuteFrame UPSTREAM, so it must sit downstream of
+    # the STT for that frame to reach it.
+    stages.append(MicControlWatcher(
+        str(Path(config.DASHBOARD_LOG).with_suffix(".mic_control.json"))))
     stages.append(user_agg)
     stages.append(llm)
+    # TTS comes straight after the LLM. The assistant aggregator must come AFTER
+    # it, not before: LLMAssistantAggregator.process_frame() has no TextFrame
+    # branch, so it CONSUMES LLMTextFrame and never pushes it downstream. With
+    # the aggregator between the LLM and the TTS the TTS received no text at
+    # all and the agent was silent -- while the LLM had in fact answered.
+    # This is the canonical Pipecat order: llm -> tts -> output -> assistant_agg.
+    stages.append(tts)
+    stages.append(output_transport)
     if assistant_agg is not None:
         stages.append(assistant_agg)
-    stages += [tts, output_transport,
-               MicControlWatcher(str(Path(config.DASHBOARD_LOG).with_suffix(".mic_control.json"))),
-               FweddieLogger(bus)]
+    # The logger observes speaking frames, which are pushed downstream all the
+    # way to the end of the pipeline, so it stays last. The mic toggle is NOT
+    # here: it pushes STTMuteFrame UPSTREAM, so it must sit after the STT.
+    stages.append(FweddieLogger(bus))
     pipeline = Pipeline(stages)
     task = PipelineTask(pipeline)
 

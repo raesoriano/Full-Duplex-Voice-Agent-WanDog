@@ -81,18 +81,31 @@ ASR_SAMPLE_RATE = 16000
 # ---------------------------------------------------------------------------
 # VAD (Silero ONNX via onnxruntime -- no torch)
 # ---------------------------------------------------------------------------
-# Tuned for this Pi's far-field USB mic. Measured on real capture,
-# Silero confidence peaks around 0.45-0.47 for speech a metre away,
-# so the stock 0.7 never fires. The same audio scores 1.00 when
-# close-mic, so this is sensitivity, not a broken VAD.
-VAD_CONFIDENCE = float(os.environ.get("FWEDDIE_VAD_CONFIDENCE", 0.35))
-VAD_START_SECS = float(os.environ.get("FWEDDIE_VAD_START", 0.15))
-VAD_STOP_SECS = float(os.environ.get("FWEDDIE_VAD_STOP", 0.8))
-# Pipecat 1.15 measures volume on a 0.0–1.0 scale (BS.1770 loudness), not the
+# Tuned for this Pi's USB mic, from measurements on real captures
+# (/tmp/fweddie_diag_mic.wav, /tmp/fweddie_speech.wav, resampled to 16 kHz):
+#   Silero confidence is sharply bimodal -- quiet p50 0.067, speech p50 1.000
+#   -- so the confidence gate is the ONLY gate that actually discriminates.
+#   0.35 let keyboard clicks and room noise through, and the agent kept
+#   interrupting itself (18 user_started events in one live session). 0.6 sits
+#   in the empty gap between the two modes: still fires on real speech, ignores
+#   clicks. The old comment here claimed speech peaks at 0.45-0.47; measured on
+#   this mic it reaches 1.00, so that was wrong.
+# start_secs is the debounce: at 0.15s a single keypress counted as speech.
+# 0.25s requires a sound to last longer than a click before a turn starts.
+VAD_CONFIDENCE = float(os.environ.get("FWEDDIE_VAD_CONFIDENCE", 0.6))
+VAD_START_SECS = float(os.environ.get("FWEDDIE_VAD_START", 0.25))
+VAD_STOP_SECS = float(os.environ.get("FWEDDIE_VAD_STOP", 0.7))
+# Pipecat 1.15 measures volume on a 0.0-1.0 scale (BS.1770 loudness), not the
 # old int16 amplitude. A value like 400 (the pre-1.15 default) makes
 # `volume >= min_volume` always False, so VAD never fires and barge-in dies.
-# Far-field speech volume on this mic peaks ~0.75, so 0.6 sat too
-# close to the ceiling; 0.35 leaves headroom and still gates hum.
+#
+# Measured on this Pi, the loudness curve saturates almost immediately: a pure
+# tone at amplitude 0.01 already scores 0.66, 0.05 -> 0.80, 0.30 -> 0.96,
+# 0.50 -> 1.00. Speech and room noise on this mic both land around 0.15-0.19,
+# so this gate passes nearly everything and CANNOT separate them. It is kept
+# only as a floor against digital silence; VAD_CONFIDENCE does the real work.
+# Do not raise it hoping to reject noise -- it will just deafen the agent.
+# (The old comment claiming far-field speech peaks at 0.75 was wrong.)
 VAD_MIN_VOLUME = float(os.environ.get("FWEDDIE_VAD_MIN_VOLUME", 0.35))
 
 # ---------------------------------------------------------------------------
