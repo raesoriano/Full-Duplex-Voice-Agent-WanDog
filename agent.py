@@ -369,7 +369,7 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     # --- LLM (OnIt, OpenAI-compatible, raw-audio input) --------------------
     system_prompt = config.SYSTEM_PROMPT
     if bridge is not None:
-        system_prompt = (system_prompt + " " + config.TOOLS_SYSTEM_PROMPT).strip()
+        system_prompt = (system_prompt + " " + config.tools_system_prompt()).strip()
     llm_settings: dict = dict(
         model=config.LLM_MODEL,
         system_instruction=system_prompt,

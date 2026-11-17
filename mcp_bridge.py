@@ -283,20 +283,154 @@ def _announcement(tool_name: str) -> str:
     return _ANNOUNCEMENTS.get(tool_name, "One moment.")
 
 
+# Words that mean the answer is time-sensitive. Used only to fill in a missing
+# `type` argument on a `search` call -- never to override one the model set.
+# Deliberately narrow: "news", "latest", "today" and the like. A false positive
+# costs one dated search instead of an undated one, which is the cheaper error.
+_RECENCY_WORDS = (
+    "news", "latest", "today", "tonight", "yesterday", "this week",
+    "this morning", "right now", "currently", "current", "recent",
+    "recently", "breaking", "headline", "headlines", "update", "updates",
+    "who won", "election", "score", "scores", "price", "prices", "stock",
+    "stocks", "weather", "forecast", "just happened", "newest",
+)
+
+
+def _looks_time_sensitive(query: str) -> bool:
+    """Does this query need dated results?"""
+    q = " ".join((query or "").lower().split())
+    if not q:
+        return False
+    return any(w in q for w in _RECENCY_WORDS)
+
+
+def _shape_search_args(args: dict) -> dict:
+    """Fill in ``type="news"`` when the query is clearly about recency.
+
+    The model has the tool description in front of it and still passed no
+    `type` on 13 out of 13 real searches, so every one hit the general index,
+    which returns no dates at all. This is the deterministic half of the fix:
+    an argument the model omitted is supplied here.
+
+    Note which case this can and cannot see. The tool schema declares
+    ``type: {default: "web"}``, and Pipecat fills defaults in from the
+    signature, so by the time the handler runs, ``args["type"] == "web"``
+    whether the model chose it or said nothing at all. Those two are
+    indistinguishable here, so "web" is treated as "unspecified" and a
+    recency-shaped query is upgraded. Only an explicit non-web choice --
+    ``"news"`` itself, or anything else the server later adds -- is left alone.
+    """
+    if not config.MCP_NEWS_AUTODETECT:
+        return args
+    if not isinstance(args, dict):
+        return args
+    if "type" in args and args.get("type") not in (None, "", "web"):
+        return args          # an explicit, non-default choice; respect it
+    if not _looks_time_sensitive(args.get("query") or ""):
+        return args
+    shaped = dict(args)
+    shaped["type"] = "news"
+    # Five is the news branch's useful ceiling for a spoken answer; a bigger
+    # number only pushes more of the payload past the model's cap.
+    try:
+        if int(shaped.get("max_results") or 0) < 3:
+            shaped["max_results"] = 5
+    except (TypeError, ValueError):
+        shaped["max_results"] = 5
+    return shaped
+
+
+def _search_failed(text: str) -> bool:
+    """Did a `search` call come back as an error object?"""
+    if not isinstance(text, str):
+        return False
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return False
+    try:
+        data = json.loads(stripped)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(data, dict) and bool(data.get("error"))
+
+
 def _cap_for_model(text: str, limit: int) -> str:
     """Return the part of a tool result the LLM is allowed to see.
 
     The voice reply is one or two sentences, so the model needs the head of the
-    result, not all of it. Keeping the head and naming the remainder tells the
-    model what it is missing without asking it to digest a wall of JSON. The
-    full text is untouched: it goes to the dashboard and the session folder.
+    result, not all of it -- but it needs a *parseable* head. A blind
+    ``text[:limit]`` slice lands mid-string, so a 5-result news payload came
+    back as one title plus a dangling fragment and the model could not see the
+    ``date`` field of any result. That is the difference between "the search
+    gave me old news" and "the search gave me nothing I can read".
 
-    ``limit <= 0`` disables the cap.
+    So the cap is structural where the result is a JSON list (which is what
+    every OnIt search returns): whole results are kept, the count of dropped
+    results is stated, and the text stays valid JSON. Anything else -- plain
+    text, a dict, a malformed payload -- falls back to the old head-slice,
+    which is right for a file read or a shell transcript.
+
+    The full text is untouched: it goes to the dashboard and the session
+    folder. ``limit <= 0`` disables the cap.
     """
     if limit <= 0 or len(text) <= limit:
         return text
+
+    capped = _cap_json_list(text, limit)
+    if capped is not None:
+        return capped
+
     return (text[:limit].rstrip()
             + f"\n[truncated: showing {limit} of {len(text)} chars]")
+
+
+def _cap_json_list(text: str, limit: int) -> Optional[str]:
+    """Keep whole items of a JSON list until ``limit``, or None if not a list.
+
+    The budget has to be reserved for the trailer before items are counted, so
+    the answer is found by trying, not by arithmetic on the input length.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("["):
+        return None
+    try:
+        items = json.loads(stripped)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(items, list) or not items:
+        return None
+
+    def render(keep: int) -> str:
+        dropped = len(items) - keep
+        if dropped <= 0:
+            return json.dumps(items, ensure_ascii=False)
+        # The trailer is deliberately plain: a voice model reads it as a
+        # sentence ("showing 2 of 5 results"), not as another result object.
+        return json.dumps(
+            {
+                "results": items[:keep],
+                "showing": keep,
+                "total": len(items),
+                "note": f"showing {keep} of {len(items)} results; the rest "
+                        f"were dropped to fit the model's context",
+            },
+            ensure_ascii=False,
+        )
+
+    # Largest prefix that fits. Items vary in size, so walk down from the full
+    # list rather than assuming an average.
+    for keep in range(len(items), 0, -1):
+        out = render(keep)
+        if len(out) <= limit:
+            return out
+    # Not even one whole result fits. A truncated single result is worse than
+    # an honest empty answer, so say what happened and keep the count.
+    return json.dumps(
+        {"results": [], "showing": 0, "total": len(items),
+         "note": f"all {len(items)} results were too large to show "
+                 f"within {limit} chars"},
+        ensure_ascii=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -593,9 +727,17 @@ class ToolBridgeProcessor(FrameProcessor):
             # silence during that time reads as "it stopped working". This is a
             # fixed phrase on purpose: it must not depend on the model.
             await self._say(_announcement(name))
+            call_args = dict(kwargs)
+            if name == "search":
+                call_args = _shape_search_args(call_args)
             try:
+                # One deadline for the whole call, retries included. Wrapping
+                # only the individual attempt would let a 3-attempt search hold
+                # a voice turn for 3x MCP_TOOL_TIMEOUT, which is minutes of
+                # silence -- the very failure the spoken announcement exists to
+                # avoid.
                 text = await asyncio.wait_for(
-                    self.guard.handle(name, kwargs, server, server.call_tool),
+                    self._call_with_search_retry(name, call_args, server),
                     timeout=config.MCP_TOOL_TIMEOUT,
                 )
             except asyncio.TimeoutError:
@@ -606,10 +748,10 @@ class ToolBridgeProcessor(FrameProcessor):
                 text = f"[tool error] {name}: {e}"
 
             full = text if isinstance(text, str) else str(text)
-            # Layer 3: the model sees a bounded head of the result; the full
-            # text stays in the session folder and on the dashboard. This is
-            # what keeps a huge MCP payload from being the thing that decides
-            # whether the agent speaks.
+            # Layer 3: the model sees a bounded, parseable head of the result;
+            # the full text stays in the session folder and on the dashboard.
+            # This is what keeps a huge MCP payload from being the thing that
+            # decides whether the agent speaks.
             model_text = _cap_for_model(full, config.MCP_MODEL_RESULT_CHARS)
 
             # Layer 1: make the tool turn observable. The event log used to
@@ -632,6 +774,35 @@ class ToolBridgeProcessor(FrameProcessor):
         _handler.__onit_schema__ = schema  # type: ignore[attr-defined]
         _handler.__onit_server__ = server.name  # type: ignore[attr-defined]
         return _handler
+
+    async def _call_with_search_retry(self, name: str, call_args: dict,
+                                      server) -> str:
+        """Run a tool, retrying a failed ``search`` a bounded number of times.
+
+        OnIt's news branch calls ddgs once and converts any exception into
+        ``{"error": "Search failed: ..."}``. ddgs *raises* rather than returning
+        ``[]`` when its aggregator is rate-limited, measured at roughly 2
+        failures in 8 news searches. The web branch already retries three times
+        inside OnIt; the news branch never got that fix, and we are not editing
+        OnIt, so the retry lives here.
+
+        Only ``search`` is retried. It is read-only, so a second attempt cannot
+        run a command twice -- a retried ``bash`` or ``write_file`` could.
+        """
+        text = await self.guard.handle(name, call_args, server, server.call_tool)
+        if name != "search":
+            return text
+
+        attempts = max(1, config.MCP_SEARCH_RETRIES)
+        for attempt in range(1, attempts):
+            if not _search_failed(text):
+                return text
+            logger.info("Search failed ({}), retry {}/{}",
+                        str(text)[:120], attempt, attempts - 1)
+            await asyncio.sleep(config.MCP_SEARCH_RETRY_DELAY * attempt)
+            text = await self.guard.handle(name, call_args, server,
+                                           server.call_tool)
+        return text
 
     async def close(self) -> None:
         for server in self.servers:
