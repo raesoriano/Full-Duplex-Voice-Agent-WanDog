@@ -1,11 +1,11 @@
-"""Fweddie -- configuration.
+"""WanDog -- configuration.
 
 All knobs for the voice agent live here. Values can be overridden with
 environment variables so the same code runs on the Pi and on a dev box.
 
 LLM key resolution order (first hit wins) -- mirrors how OnIt itself
 resolves endpoint keys, so a key stored once by `onit setup` is picked up
-by Fweddie with no manual export:
+by WanDog with no manual export:
   1. ONIT_LLM_API_KEY env var
   2. OS keychain via `keyring` (service "onit", user
      "endpoint_key:<base_url>" -- the exact key OnIt writes)
@@ -26,8 +26,11 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-PIPER_VOICE_DIR = Path(os.environ.get("FWEDDIE_PIPER_DIR", "/home/raesoriano/.piper"))
-PIPER_VOICE = os.environ.get("FWEDDIE_PIPER_VOICE", "en_US-lessac-medium")
+PIPER_VOICE_DIR = Path(os.environ.get("WANDOG_PIPER_DIR", "/home/raesoriano/.piper"))
+# Ryan (US English, medium quality). The ONNX model + its .onnx.json config
+# live in PIPER_VOICE_DIR; PiperTTSService downloads them on first use if they
+# are missing. 61 MB -- see "The TTS voice is Piper Ryan" in WanDog-notes.md.
+PIPER_VOICE = os.environ.get("WANDOG_PIPER_VOICE", "en_US-ryan-medium")
 
 # ---------------------------------------------------------------------------
 # Audio
@@ -38,14 +41,14 @@ PIPER_VOICE = os.environ.get("FWEDDIE_PIPER_VOICE", "en_US-lessac-medium")
 # hardware at 48 kHz and convert in software where a lower rate is needed
 # (ASR/VAD want 16 kHz; Piper TTS emits 22.05 kHz and gets resampled up by
 # the output transport).
-INPUT_SAMPLE_RATE = int(os.environ.get("FWEDDIE_IN_RATE", 48000))
-OUTPUT_SAMPLE_RATE = int(os.environ.get("FWEDDIE_OUT_RATE", 48000))
+INPUT_SAMPLE_RATE = int(os.environ.get("WANDOG_IN_RATE", 48000))
+OUTPUT_SAMPLE_RATE = int(os.environ.get("WANDOG_OUT_RATE", 48000))
 
 # PyAudio device indices. Pinned by default to the two USB devices on the Pi:
 #   index 0 = "USB PnP Audio Device"   (hw:2,0) -- the MIC (verified: it is the
 #              card that actually returns audio on capture)
 #   index 1 = "USB Composite Device"   (hw:3,0) -- the SPEAKER (playback)
-# Override with FWEDDIE_IN_DEVICE / FWEDDIE_OUT_DEVICE (an empty string means
+# Override with WANDOG_IN_DEVICE / WANDOG_OUT_DEVICE (an empty string means
 # "use the system default" instead of a pinned index).
 def _device_index(env: str, default: int) -> int | None:
     raw = os.environ.get(env)
@@ -55,7 +58,7 @@ def _device_index(env: str, default: int) -> int | None:
     return int(raw) if raw else None
 
 
-INPUT_DEVICE_INDEX = _device_index("FWEDDIE_IN_DEVICE", 0)
+INPUT_DEVICE_INDEX = _device_index("WANDOG_IN_DEVICE", 0)
 # ALSA card number for the capture device. PortAudio index 0 == ALSA card 2
 # on this Pi. Used only to READ and report the current gain at startup --
 # the agent never writes it. The gain is yours to set, because it depends on
@@ -66,14 +69,14 @@ INPUT_DEVICE_INDEX = _device_index("FWEDDIE_IN_DEVICE", 0)
 # (34% is too quiet -- Silero scores real speech at ~0.05 and the agent looks
 # deaf. 100% is too hot -- it clips on speech and picks up the keyboard and
 # the speaker's own output. Somewhere in the middle is the sweet spot.)
-# Set FWEDDIE_MIC_CARD="" to skip even the read.
-MIC_CARD = os.environ.get("FWEDDIE_MIC_CARD", "2")
-OUTPUT_DEVICE_INDEX = _device_index("FWEDDIE_OUT_DEVICE", 1)
+# Set WANDOG_MIC_CARD="" to skip even the read.
+MIC_CARD = os.environ.get("WANDOG_MIC_CARD", "2")
+OUTPUT_DEVICE_INDEX = _device_index("WANDOG_OUT_DEVICE", 1)
 
 # ---------------------------------------------------------------------------
 # ASR (local, no API key)
 # ---------------------------------------------------------------------------
-# Two backends, selected with FWEDDIE_ASR_BACKEND:
+# Two backends, selected with WANDOG_ASR_BACKEND:
 #
 #   "streaming" (default) -- sherpa-onnx streaming zipformer. Decodes the mic
 #       audio as it arrives, so the words appear WHILE you are still talking.
@@ -86,39 +89,39 @@ OUTPUT_DEVICE_INDEX = _device_index("FWEDDIE_OUT_DEVICE", 1)
 #
 #   "whisper" -- the old segmented faster-whisper path: nothing at all until
 #       you stop speaking, then ~4.9 s of transcription. Kept as a fallback
-#       and for A/B comparison (FWEDDIE_ASR_BACKEND=whisper).
+#       and for A/B comparison (WANDOG_ASR_BACKEND=whisper).
 #
 # Both want 16 kHz, so the 48 kHz capture is resampled down once, before VAD.
-ASR_ENABLED = os.environ.get("FWEDDIE_ASR", "1") != "0"
-ASR_BACKEND = os.environ.get("FWEDDIE_ASR_BACKEND", "streaming").strip().lower()
+ASR_ENABLED = os.environ.get("WANDOG_ASR", "1") != "0"
+ASR_BACKEND = os.environ.get("WANDOG_ASR_BACKEND", "streaming").strip().lower()
 
 # --- streaming backend ------------------------------------------------------
 # Directory holding the sherpa-onnx streaming zipformer. Downloaded once into
 # the repo (models/ is gitignored); the service raises a clear error naming the
 # download command if it is missing.
 ASR_STREAM_MODEL_DIR = os.environ.get(
-    "FWEDDIE_ASR_STREAM_DIR",
+    "WANDOG_ASR_STREAM_DIR",
     str(Path(__file__).with_name("models")
         / "sherpa-onnx-streaming-zipformer-en-2023-06-26"),
 )
 # ONNX Runtime threads for the encoder. The Pi has 4 cores and must also run
 # VAD, the LLM client and Piper, so leave headroom.
-ASR_THREADS = int(os.environ.get("FWEDDIE_ASR_THREADS", 2))
+ASR_THREADS = int(os.environ.get("WANDOG_ASR_THREADS", 2))
 # Second, non-streaming pass that produces the final text. "none" disables it
 # and uses the streaming model's own output as the final transcript.
-ASR_FINAL_PASS = os.environ.get("FWEDDIE_ASR_FINAL", "whisper").strip().lower()
+ASR_FINAL_PASS = os.environ.get("WANDOG_ASR_FINAL", "whisper").strip().lower()
 # tiny.en transcribes this Pi's audio in 0.86 s and is word-perfect on the test
 # captures; base.en is 1.6 s and small.en 4.9 s for no gain on short turns.
-ASR_FINAL_MODEL = os.environ.get("FWEDDIE_ASR_FINAL_MODEL", "tiny.en")
+ASR_FINAL_MODEL = os.environ.get("WANDOG_ASR_FINAL_MODEL", "tiny.en")
 # Audio kept from before the VAD fires (it needs ~0.25 s of speech to trigger,
 # and without this the streaming decoder starts mid-word).
-ASR_PREROLL_SECS = float(os.environ.get("FWEDDIE_ASR_PREROLL", 1.0))
+ASR_PREROLL_SECS = float(os.environ.get("WANDOG_ASR_PREROLL", 1.0))
 
 # --- whisper backend (segmented) -------------------------------------------
-ASR_MODEL = os.environ.get("FWEDDIE_ASR_MODEL", "small")
-ASR_DEVICE = os.environ.get("FWEDDIE_ASR_DEVICE", "auto")   # auto|cpu|cuda
-ASR_COMPUTE = os.environ.get("FWEDDIE_ASR_COMPUTE", "int8")  # int8 is fast on the Pi
-ASR_LANGUAGE = os.environ.get("FWEDDIE_ASR_LANGUAGE", "en")
+ASR_MODEL = os.environ.get("WANDOG_ASR_MODEL", "small")
+ASR_DEVICE = os.environ.get("WANDOG_ASR_DEVICE", "auto")   # auto|cpu|cuda
+ASR_COMPUTE = os.environ.get("WANDOG_ASR_COMPUTE", "int8")  # int8 is fast on the Pi
+ASR_LANGUAGE = os.environ.get("WANDOG_ASR_LANGUAGE", "en")
 # Resample the 48 kHz capture to 16 kHz for ASR (both backends want 16k).
 ASR_SAMPLE_RATE = 16000
 
@@ -126,7 +129,7 @@ ASR_SAMPLE_RATE = 16000
 # VAD (Silero ONNX via onnxruntime -- no torch)
 # ---------------------------------------------------------------------------
 # Tuned for this Pi's USB mic, from measurements on real captures
-# (/tmp/fweddie_diag_mic.wav, /tmp/fweddie_speech.wav, resampled to 16 kHz):
+# (/tmp/wandog_diag_mic.wav, /tmp/wandog_speech.wav, resampled to 16 kHz):
 #   Silero confidence is sharply bimodal -- quiet p50 0.067, speech p50 1.000
 #   -- so the confidence gate is the ONLY gate that actually discriminates.
 #   0.35 let keyboard clicks and room noise through, and the agent kept
@@ -136,8 +139,8 @@ ASR_SAMPLE_RATE = 16000
 #   this mic it reaches 1.00, so that was wrong.
 # start_secs is the debounce: at 0.15s a single keypress counted as speech.
 # 0.25s requires a sound to last longer than a click before a turn starts.
-VAD_CONFIDENCE = float(os.environ.get("FWEDDIE_VAD_CONFIDENCE", 0.6))
-VAD_START_SECS = float(os.environ.get("FWEDDIE_VAD_START", 0.25))
+VAD_CONFIDENCE = float(os.environ.get("WANDOG_VAD_CONFIDENCE", 0.6))
+VAD_START_SECS = float(os.environ.get("WANDOG_VAD_START", 0.25))
 # The real silence gate, in combination with TURN_STOP_SECS below.
 #
 # WARNING: until now this value was never actually in force. agent.py handed
@@ -149,7 +152,7 @@ VAD_START_SECS = float(os.environ.get("FWEDDIE_VAD_START", 0.25))
 # (the 0.25 s debounce was really 0.13 s) and why a 0.8 s pause split a
 # sentence. Each consumer now gets its own analyzer, so the number below is
 # the number that runs.
-VAD_STOP_SECS = float(os.environ.get("FWEDDIE_VAD_STOP", 0.7))
+VAD_STOP_SECS = float(os.environ.get("WANDOG_VAD_STOP", 0.7))
 
 # ---------------------------------------------------------------------------
 # Turn end ("the user has finished asking")
@@ -184,11 +187,11 @@ VAD_STOP_SECS = float(os.environ.get("FWEDDIE_VAD_STOP", 0.7))
 #
 # Why not lower, and why this matters: a pause longer than the gate ends the
 # turn, and the words said after it open a NEW turn. Measured in
-# /tmp/fweddie_events.jsonl (19:41:05, "Senate elections." [pause] "as in
+# /tmp/wandog_events.jsonl (19:41:05, "Senate elections." [pause] "as in
 # senators. ..."): the pause split one question into two and the clarifying
 # phrase was answered as if it were a new question. 1.0 s covers an ordinary
 # clause pause without adding perceptible lag.
-TURN_STOP_SECS = float(os.environ.get("FWEDDIE_TURN_STOP", 1.0))
+TURN_STOP_SECS = float(os.environ.get("WANDOG_TURN_STOP", 1.0))
 # Hard ceiling: seconds without ANY user activity before an open turn is
 # closed regardless of what the stop strategy thinks.
 #
@@ -203,7 +206,7 @@ TURN_STOP_SECS = float(os.environ.get("FWEDDIE_TURN_STOP", 1.0))
 # turn closed 31 ms before the VAD stop, prompt contained system+developer
 # only, and the reply was "could you repeat that" -- the agent "not
 # answering". Leave this at 5.0.
-TURN_STOP_TIMEOUT_SECS = float(os.environ.get("FWEDDIE_TURN_STOP_TIMEOUT", 5.0))
+TURN_STOP_TIMEOUT_SECS = float(os.environ.get("WANDOG_TURN_STOP_TIMEOUT", 5.0))
 
 # Pipecat 1.15 measures volume on a 0.0-1.0 scale (BS.1770 loudness), not the
 # old int16 amplitude. A value like 400 (the pre-1.15 default) makes
@@ -216,7 +219,7 @@ TURN_STOP_TIMEOUT_SECS = float(os.environ.get("FWEDDIE_TURN_STOP_TIMEOUT", 5.0))
 # only as a floor against digital silence; VAD_CONFIDENCE does the real work.
 # Do not raise it hoping to reject noise -- it will just deafen the agent.
 # (The old comment claiming far-field speech peaks at 0.75 was wrong.)
-VAD_MIN_VOLUME = float(os.environ.get("FWEDDIE_VAD_MIN_VOLUME", 0.35))
+VAD_MIN_VOLUME = float(os.environ.get("WANDOG_VAD_MIN_VOLUME", 0.35))
 
 # ---------------------------------------------------------------------------
 # LLM (OpenAI-compatible endpoint -- OnIt's DGX cluster)
@@ -242,12 +245,12 @@ LLM_THINKING = os.environ.get("ONIT_LLM_THINKING", "0") == "1"
 # ---------------------------------------------------------------------------
 # OnIt MCP tools (spawn OnIt's own stdio servers and expose their tools)
 # ---------------------------------------------------------------------------
-# Fweddie talks to OnIt's tools the same way OnIt does: it spawns OnIt's own
+# WanDog talks to OnIt's tools the same way OnIt does: it spawns OnIt's own
 # stdio MCP servers (the bash/file/search/web servers, launched by
 # `python -m src.mcp.servers.run`) and speaks the MCP protocol to them. The
 # safeguards -- the AST command allowlist, the approval gate, and the
 # DATA_PATH file jail -- all live INSIDE those spawned server processes, so
-# Fweddie inherits them for free without re-implementing any of it.
+# WanDog inherits them for free without re-implementing any of it.
 ONIT_REPO = os.environ.get("ONIT_REPO", "/home/raesoriano/onit")
 ONIT_PYTHON = os.environ.get(
     "ONIT_PYTHON", os.path.join(ONIT_REPO, ".venv", "bin", "python")
@@ -256,12 +259,12 @@ ONIT_PYTHON = os.environ.get(
 # The jail root for the file tools. OnIt's bash server defaults its DATA_PATH
 # to <tmp>/onit/data; we pin the same value so a tool call can only read/write
 # inside it (read_file may also reach DOCUMENTS_PATH). Keep this a directory
-# Fweddie is allowed to touch.
+# WanDog is allowed to touch.
 MCP_DATA_PATH = os.environ.get(
-    "FWEDDIE_MCP_DATA_PATH", "/tmp/onit/data"
+    "WANDOG_MCP_DATA_PATH", "/tmp/onit/data"
 )
 # Extra read-only documents dir for read_file (OnIt's DOCUMENTS_PATH).
-MCP_DOCUMENTS_PATH = os.environ.get("FWEDDIE_MCP_DOCS_PATH", "")
+MCP_DOCUMENTS_PATH = os.environ.get("WANDOG_MCP_DOCS_PATH", "")
 
 # Which OnIt servers to spawn. Each becomes a stdio subprocess of OnIt's
 # interpreter. 'local' = bash + file + local search; 'net' = web search +
@@ -271,16 +274,16 @@ MCP_SERVERS = [
     {"name": "ToolsNetMCPServer", "module": "tasks.tools", "profile": "net"},
 ]
 
-# Master switch for the tool bridge (off = Fweddie just talks, no tools).
-MCP_TOOLS_ENABLED = os.environ.get("FWEDDIE_MCP_TOOLS", "1") != "0"
+# Master switch for the tool bridge (off = WanDog just talks, no tools).
+MCP_TOOLS_ENABLED = os.environ.get("WANDOG_MCP_TOOLS", "1") != "0"
 # Per-tool-call wall clock (seconds). OnIt's bash tool caps itself at 300s;
 # this is a slightly looser outer guard so a wedged call cannot hang the
 # voice loop.
-MCP_TOOL_TIMEOUT = float(os.environ.get("FWEDDIE_MCP_TOOL_TIMEOUT", 320))
+MCP_TOOL_TIMEOUT = float(os.environ.get("WANDOG_MCP_TOOL_TIMEOUT", 320))
 # How long to wait for a person to answer an approval prompt before treating
 # it as a refusal (fail-closed). OnIt's own tickets expire after 900s; we are
 # tighter because a voice agent should not hang mid-conversation.
-MCP_APPROVAL_TIMEOUT = float(os.environ.get("FWEDDIE_MCP_APPROVAL_TIMEOUT", 120))
+MCP_APPROVAL_TIMEOUT = float(os.environ.get("WANDOG_MCP_APPROVAL_TIMEOUT", 120))
 # How much of a tool result the MODEL is allowed to see, in characters.
 # The full result is kept for the dashboard and the session folder; only this
 # much is handed back to the LLM.
@@ -321,7 +324,7 @@ MCP_APPROVAL_TIMEOUT = float(os.environ.get("FWEDDIE_MCP_APPROVAL_TIMEOUT", 120)
 # number enforces it.
 #
 # 0 disables the cap (the old behaviour).
-MCP_MODEL_RESULT_CHARS = int(os.environ.get("FWEDDIE_MCP_MODEL_RESULT_CHARS", 24000))
+MCP_MODEL_RESULT_CHARS = int(os.environ.get("WANDOG_MCP_MODEL_RESULT_CHARS", 24000))
 
 # Search retries. OnIt's news branch calls ddgs once and turns any exception
 # into {"error": "Search failed: No results found."} -- ddgs RAISES rather than
@@ -330,16 +333,16 @@ MCP_MODEL_RESULT_CHARS = int(os.environ.get("FWEDDIE_MCP_MODEL_RESULT_CHARS", 24
 # OnIt; the news branch never got that fix. We cannot change OnIt here, so the
 # bridge retries the call itself. Only read-only `search` calls are retried:
 # a retried `bash` or `write_file` could run twice.
-MCP_SEARCH_RETRIES = int(os.environ.get("FWEDDIE_MCP_SEARCH_RETRIES", 3))
-MCP_SEARCH_RETRY_DELAY = float(os.environ.get("FWEDDIE_MCP_SEARCH_RETRY_DELAY", 1.5))
+MCP_SEARCH_RETRIES = int(os.environ.get("WANDOG_MCP_SEARCH_RETRIES", 3))
+MCP_SEARCH_RETRY_DELAY = float(os.environ.get("WANDOG_MCP_SEARCH_RETRY_DELAY", 1.5))
 
 # Should a recency-shaped search be sent as type="news" even when the model
 # said nothing about it? Measured over 13 real `search` calls in
-# /tmp/fweddie_events.jsonl: the model passed no `type` argument once, so
+# /tmp/wandog_events.jsonl: the model passed no `type` argument once, so
 # every call hit the general index, whose results carry NO date. The tool
 # description does tell it to use "news" for recency -- it does not do it.
 # This is the deterministic backstop. Set to 0 to let the model decide alone.
-MCP_NEWS_AUTODETECT = os.environ.get("FWEDDIE_MCP_NEWS_AUTODETECT", "1") == "1"
+MCP_NEWS_AUTODETECT = os.environ.get("WANDOG_MCP_NEWS_AUTODETECT", "1") == "1"
 
 # How many news results to ASK OnIt for, regardless of how many the model
 # wants. ddgs returns news in relevance order, not date order, so the newest
@@ -349,11 +352,11 @@ MCP_NEWS_AUTODETECT = os.environ.get("FWEDDIE_MCP_NEWS_AUTODETECT", "1") == "1"
 # "November 12" while 17 Nov stories sat further down the same payload. The
 # fix is to over-fetch, sort by date, then trim back to what was asked for.
 # 10 is ddgs' practical ceiling for one news page.
-MCP_NEWS_OVERFETCH = int(os.environ.get("FWEDDIE_MCP_NEWS_OVERFETCH", 10))
+MCP_NEWS_OVERFETCH = int(os.environ.get("WANDOG_MCP_NEWS_OVERFETCH", 10))
 
 # Sort a news payload newest-first before the model sees it, and label each
 # result with its age ("today", "3 days ago"). Off = keep ddgs' own order.
-MCP_NEWS_SORT = os.environ.get("FWEDDIE_MCP_NEWS_SORT", "1") == "1"
+MCP_NEWS_SORT = os.environ.get("WANDOG_MCP_NEWS_SORT", "1") == "1"
 
 # ddgs returns a DIFFERENT page for the same query on consecutive calls: six
 # calls on "Alaska US Senate election results" split into two distinct sets,
@@ -363,16 +366,16 @@ MCP_NEWS_SORT = os.environ.get("FWEDDIE_MCP_NEWS_SORT", "1") == "1"
 # times and the NEWEST payload wins. Measured over 6 rounds: newest item was
 # from today on 3/6 first calls and 5/6 with two extra calls; mean latency
 # 0.8s -> 2.2s, hidden behind the spoken announcement.
-MCP_NEWS_REFRESH_RETRIES = int(os.environ.get("FWEDDIE_MCP_NEWS_REFRESH_RETRIES", 2))
-MCP_NEWS_REFRESH_DELAY = float(os.environ.get("FWEDDIE_MCP_NEWS_REFRESH_DELAY", 0.6))
+MCP_NEWS_REFRESH_RETRIES = int(os.environ.get("WANDOG_MCP_NEWS_REFRESH_RETRIES", 2))
+MCP_NEWS_REFRESH_DELAY = float(os.environ.get("WANDOG_MCP_NEWS_REFRESH_DELAY", 0.6))
 # A page whose newest item is this many days old or newer counts as fresh
 # enough to stop re-asking. 0 = only a same-day story stops the retry.
-MCP_NEWS_FRESH_DAYS = int(os.environ.get("FWEDDIE_MCP_NEWS_FRESH_DAYS", 0))
+MCP_NEWS_FRESH_DAYS = int(os.environ.get("WANDOG_MCP_NEWS_FRESH_DAYS", 0))
 # Hard ceiling on the whole news refresh, in seconds. ddgs occasionally takes
 # 5-10s for a single call, and this is a voice turn: a retry that pushes the
 # answer past this budget is worse than a page that is a day old. Measured
 # worst case without it: 10.6s to first speech.
-MCP_NEWS_REFRESH_BUDGET = float(os.environ.get("FWEDDIE_MCP_NEWS_REFRESH_BUDGET", 4.0))
+MCP_NEWS_REFRESH_BUDGET = float(os.environ.get("WANDOG_MCP_NEWS_REFRESH_BUDGET", 4.0))
 
 # Which backend serves a news search.
 #
@@ -397,15 +400,15 @@ MCP_NEWS_REFRESH_BUDGET = float(os.environ.get("FWEDDIE_MCP_NEWS_REFRESH_BUDGET"
 # "tavily" (default) = Tavily first, ddgs fallback. "onit" = always ddgs.
 # The key is read from the same secrets store as the other tool secrets; with
 # no key this setting is inert and news stays on ddgs.
-MCP_NEWS_BACKEND = os.environ.get("FWEDDIE_MCP_NEWS_BACKEND", "tavily").strip().lower()
+MCP_NEWS_BACKEND = os.environ.get("WANDOG_MCP_NEWS_BACKEND", "tavily").strip().lower()
 # Tavily's news recency window, in days. Tavily accepts 1-7 here. 1 = "today",
 # which is what "latest news" means; widen it if a query legitimately has no
 # same-day coverage (a race called three days ago).
-MCP_NEWS_TAVILY_DAYS = int(os.environ.get("FWEDDIE_MCP_NEWS_TAVILY_DAYS", 1))
+MCP_NEWS_TAVILY_DAYS = int(os.environ.get("WANDOG_MCP_NEWS_TAVILY_DAYS", 1))
 # Tavily "advanced" depth returns real published dates and better recall than
 # "basic" on news queries. Costs the same credits per call.
 MCP_NEWS_TAVILY_DEPTH = os.environ.get(
-    "FWEDDIE_MCP_NEWS_TAVILY_DEPTH", "advanced").strip().lower()
+    "WANDOG_MCP_NEWS_TAVILY_DEPTH", "advanced").strip().lower()
 
 # ---------------------------------------------------------------------------
 # Dashboard (Streamlit, reachable from other devices on the LAN)
@@ -413,16 +416,16 @@ MCP_NEWS_TAVILY_DEPTH = os.environ.get(
 # The dashboard is a separate process (dashboard.py) that tails a shared
 # event log the agent appends to, and exchanges live approval decisions with
 # the agent through two small files next to that log. Off by default so the
-# agent runs headless on the Pi with no extra surface; set FWEDDIE_DASHBOARD=1
+# agent runs headless on the Pi with no extra surface; set WANDOG_DASHBOARD=1
 # to turn it on (the agent then also writes the log so a dashboard can show
 # the session).
-DASHBOARD_ENABLED = os.environ.get("FWEDDIE_DASHBOARD", "0") == "1"
+DASHBOARD_ENABLED = os.environ.get("WANDOG_DASHBOARD", "0") == "1"
 # Where the agent writes the JSONL event log the dashboard tails. The
 # approval files live next to it: <log>.pending.json and <log>.decision.json.
-DASHBOARD_LOG = os.environ.get("FWEDDIE_DASHBOARD_LOG", "/tmp/fweddie_events.jsonl")
+DASHBOARD_LOG = os.environ.get("WANDOG_DASHBOARD_LOG", "/tmp/wandog_events.jsonl")
 # Streamlit bind: 0.0.0.0 so other devices on the LAN can open it.
-DASHBOARD_HOST = os.environ.get("FWEDDIE_DASHBOARD_HOST", "0.0.0.0")
-DASHBOARD_PORT = int(os.environ.get("FWEDDIE_DASHBOARD_PORT", 8501))
+DASHBOARD_HOST = os.environ.get("WANDOG_DASHBOARD_HOST", "0.0.0.0")
+DASHBOARD_PORT = int(os.environ.get("WANDOG_DASHBOARD_PORT", 8501))
 
 # How often the agent polls the dashboard's control files (mic toggle, typed
 # text, stop button). These are plain files next to the log -- the same
@@ -437,19 +440,19 @@ DASHBOARD_PORT = int(os.environ.get("FWEDDIE_DASHBOARD_PORT", 8501))
 # would then take up to a second to actually stop the bot talking, which reads
 # as the button being broken.
 DASHBOARD_CONTROL_POLL_SECS = float(
-    os.environ.get("FWEDDIE_DASHBOARD_CONTROL_POLL", "0.2"))
+    os.environ.get("WANDOG_DASHBOARD_CONTROL_POLL", "0.2"))
 
 # The typed-text inbox. The dashboard writes {"id": ..., "text": ...} here when
 # the Send button is pressed; the agent consumes the file (deletes it) so the
 # same message is never answered twice.
 DASHBOARD_TYPED_FILE = os.environ.get(
-    "FWEDDIE_DASHBOARD_TYPED",
+    "WANDOG_DASHBOARD_TYPED",
     str(Path(DASHBOARD_LOG).with_name(Path(DASHBOARD_LOG).name + ".typed.json")))
 
 # The stop button. The dashboard writes {"id": ..., "ts": ...}; the agent
 # consumes it and interrupts the turn exactly as a barge-in would.
 DASHBOARD_STOP_FILE = os.environ.get(
-    "FWEDDIE_DASHBOARD_STOP",
+    "WANDOG_DASHBOARD_STOP",
     str(Path(DASHBOARD_LOG).with_name(Path(DASHBOARD_LOG).name + ".stop.json")))
 
 # Clear chat history. The dashboard writes {"id": ..., "ts": ...}; the agent
@@ -458,31 +461,53 @@ DASHBOARD_STOP_FILE = os.environ.get(
 # are needed: hiding alone would come back on reload, and clearing alone would
 # leave the page looking unchanged until the agent's next poll.
 DASHBOARD_CLEAR_FILE = os.environ.get(
-    "FWEDDIE_DASHBOARD_CLEAR",
+    "WANDOG_DASHBOARD_CLEAR",
     str(Path(DASHBOARD_LOG).with_name(Path(DASHBOARD_LOG).name + ".clear.json")))
 
 # The mic toggle. Unlike the two above this file is *state*, not an action: it
 # persists, and the agent reads it every poll rather than consuming it.
 #
 # Named by appending to the log's filename, not with Path.with_suffix(). With
-# with_suffix() the name was "fweddie_events.mic_control.json" -- the ".jsonl"
+# with_suffix() the name was "wandog_events.mic_control.json" -- the ".jsonl"
 # was REPLACED -- while the other two control files appended. Two naming rules
 # for three sibling files in one directory is a trap: the dashboard test looked
 # for the appended name, found nothing, and reported the working toggle as
 # broken. Default unchanged from the old with_suffix() path so an existing
 # deployment keeps reading the same file.
 DASHBOARD_MIC_FILE = os.environ.get(
-    "FWEDDIE_DASHBOARD_MIC",
+    "WANDOG_DASHBOARD_MIC",
     str(Path(DASHBOARD_LOG).with_suffix(".mic_control.json")))
 
 # ---------------------------------------------------------------------------
 # Persona / system prompt
 # ---------------------------------------------------------------------------
 SYSTEM_PROMPT = (
-    "You are Fweddie, a friendly, upbeat voice assistant. "
+    "You are WanDog, a friendly, upbeat voice assistant. "
     "Keep replies to one or two short sentences -- you are speaking out loud, "
     "not writing. Never use markdown, bullet points, or emoji. "
     "If asked to do something you cannot do yet, say so briefly and cheerfully."
+)
+
+# Who the agent is talking to. Kept separate from SYSTEM_PROMPT so the persona
+# can be reused by a second person without editing it, and appended in the same
+# place ``agent.py`` composes the prompt.
+#
+# WHY A NAME AT ALL. Without it the model has no anchor for "who am I talking
+# to" and answers "I don't know your name" -- measured on the live pipeline,
+# where "What is my name?" produced exactly that. The GitHub handle is here
+# because the github_repo tool and the `git` in the bash tool both act on
+# raesoriano's account: a question like "what did I push last?" needs the model
+# to know whose repos "mine" means, and the token in secrets.yaml is that same
+# account's, so the two agree.
+OWNER_NAME = "Ron Andrei Soriano"
+OWNER_GITHUB = "raesoriano"
+
+OWNER_PROMPT = (
+    f"You are speaking with {OWNER_NAME}, whose GitHub username is "
+    f"{OWNER_GITHUB}. When they say 'I', 'me' or 'my', they mean him -- "
+    f"including 'my repos', which are the GitHub repositories owned by "
+    f"{OWNER_GITHUB}. If asked who they are, say his name. Never guess a "
+    f"different name, and never claim not to know it."
 )
 
 # Appended to the system prompt only when the tool bridge is active, so the
@@ -644,7 +669,7 @@ def resolve_llm_api_key() -> str:
     """Return the LLM API key or raise with a clear message.
 
     Resolution mirrors OnIt's own order (see module docstring) so a key
-    stored once via `onit setup` is shared with Fweddie.
+    stored once via `onit setup` is shared with WanDog.
     """
     # 1. Explicit env var.
     key = os.environ.get("ONIT_LLM_API_KEY")
@@ -698,7 +723,7 @@ def resolve_llm_api_key() -> str:
 # returned "OpenWeather API key not set".
 TOOL_SECRETS_PATH = Path(
     os.environ.get(
-        "FWEDDIE_SECRETS_FILE",
+        "WANDOG_SECRETS_FILE",
         str(Path(__file__).resolve().parent / "secrets.yaml"),
     )
 )

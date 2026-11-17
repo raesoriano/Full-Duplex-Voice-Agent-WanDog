@@ -1,14 +1,14 @@
-"""Does Fweddie expose the same tools OnIt does?
+"""Does WanDog expose the same tools OnIt does?
 
 Task 1 asks that the voice agent be able to use the same tools as OnIt. That
-is not a feature to build -- it is a property to pin down. Fweddie spawns
+is not a feature to build -- it is a property to pin down. WanDog spawns
 OnIt's own MCP servers, so the toolset is whatever OnIt serves today. This
 test fails the moment that stops being true: a renamed tool, a dropped server,
 or an OnIt release that moves a tool into another profile.
 
 It compares two sets, live:
   expected  -- the @mcp.tool functions registered in OnIt's task-tools server
-  actual    -- the tools Fweddie's bridge discovers by spawning that server
+  actual    -- the tools WanDog's bridge discovers by spawning that server
 
 Run: .venv/bin/python test_tool_parity.py
 """
@@ -67,7 +67,7 @@ async def main() -> int:
     finally:
         await bridge.close()
 
-    print(f"Fweddie bridge exposes {len(actual)} tools")
+    print(f"WanDog bridge exposes {len(actual)} tools")
     print("  " + ", ".join(sorted(actual)))
 
     missing = EXPECTED - actual
@@ -75,10 +75,10 @@ async def main() -> int:
 
     ok = True
     if missing:
-        print(f"\nFAIL: missing from Fweddie: {sorted(missing)}")
+        print(f"\nFAIL: missing from WanDog: {sorted(missing)}")
         ok = False
     if extra:
-        # Not a failure: OnIt may add tools, and Fweddie should gain them.
+        # Not a failure: OnIt may add tools, and WanDog should gain them.
         print(f"\nNOTE: new tools not in the expected list: {sorted(extra)}")
         print("      add them to EXPECTED so a future removal is caught.")
     if from_src and from_src != EXPECTED:

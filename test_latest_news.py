@@ -1,10 +1,10 @@
 """The latest-news fixes: does a search result reach the model intact and dated?
 
-Three defects were measured on the live agent, all of them on the Fweddie side
+Three defects were measured on the live agent, all of them on the WanDog side
 of the bridge. This test pins each one:
 
 1. NO DATES. The model passed no `type` argument on 13 out of 13 real searches
-   in /tmp/fweddie_events.jsonl, so every call hit the general web index, whose
+   in /tmp/wandog_events.jsonl, so every call hit the general web index, whose
    results carry no `date` field. It cannot rank by recency it cannot see.
    Fixed by _shape_search_args (fills the argument in) and by putting today's
    date in the system prompt (config.tools_system_prompt).

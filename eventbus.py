@@ -1,4 +1,4 @@
-"""Fweddie -- shared event bus between the agent and the dashboard.
+"""WanDog -- shared event bus between the agent and the dashboard.
 
 The agent and the dashboard are separate processes. They coordinate through
 two things, both deliberately simple (plain files) so a crash on either side

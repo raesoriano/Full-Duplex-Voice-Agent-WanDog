@@ -1,4 +1,4 @@
-"""Barge-in test for Fweddie (Pipecat 1.15.0).
+"""Barge-in test for WanDog (Pipecat 1.15.0).
 
 Barge-in in 1.15 is driven by the LLMUserAggregator's internal
 UserTurnController + VADUserTurnStartStrategy. When the user starts
@@ -8,7 +8,7 @@ InterruptionFrame that stops the bot's TTS.
 
 This test verifies the two things that must be true for barge-in to work:
 
-  1. WIRING: the real Fweddie pipeline (build_pipeline) contains an
+  1. WIRING: the real WanDog pipeline (build_pipeline) contains an
      LLMUserAggregator configured with a VAD analyzer and a
      VADUserTurnStartStrategy. Without it, barge-in silently does nothing.
 
@@ -125,7 +125,7 @@ def _speech_pcm() -> bytes:
     import wave
 
     piper = "/home/raesoriano/.piper"
-    wav = "/tmp/fweddie_speech.wav"
+    wav = "/tmp/wandog_speech.wav"
     try:
         import shutil, os
         os.makedirs("/tmp/espeak", exist_ok=True)
@@ -138,7 +138,7 @@ def _speech_pcm() -> bytes:
                    ESPEAK_DATA_PATH="/tmp/espeak/espeak-ng-data")
         subprocess.run(
             ["/tmp/espeak/espeak-ng", "-v", "en-us", "-s", "150", "-w", wav,
-             "Hello Fweddie, this is a test of the voice activity detector"],
+             "Hello WanDog, this is a test of the voice activity detector"],
             check=True, env=env, capture_output=True,
         )
         with wave.open(wav) as w:

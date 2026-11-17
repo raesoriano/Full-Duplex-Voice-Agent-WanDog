@@ -1,4 +1,4 @@
-"""Live end-to-end check: Fweddie's exact LLM wiring against the DGX cluster.
+"""Live end-to-end check: WanDog's exact LLM wiring against the DGX cluster.
 
 Builds pipecat's OpenAILLMService the same way agent.py does (key from the OS
 keychain via config.resolve_llm_api_key, thinking disabled for Qwen3.8), feeds
@@ -33,7 +33,7 @@ def build_llm() -> OpenAILLMService:
     """Mirror of the LLM construction in agent.py."""
     llm_settings = dict(
         model=config.LLM_MODEL,
-        system_instruction="You are Fweddie, a voice assistant. Answer in one short sentence.",
+        system_instruction="You are WanDog, a voice assistant. Answer in one short sentence.",
         temperature=config.LLM_TEMPERATURE,
         max_tokens=config.LLM_MAX_TOKENS,
     )

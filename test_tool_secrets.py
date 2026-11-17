@@ -53,7 +53,7 @@ class FakeKeyring:
 
 def main() -> int:
     real_keyring = config._key_from_keyring
-    tmpdir = tempfile.mkdtemp(prefix="fweddie-secrets-")
+    tmpdir = tempfile.mkdtemp(prefix="wandog-secrets-")
     secrets_file = Path(tmpdir) / "secrets.yaml"
 
     try:

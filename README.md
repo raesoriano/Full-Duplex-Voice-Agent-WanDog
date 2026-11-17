@@ -1,6 +1,6 @@
-# Full-Duplex Voice Agent: Fweddie
+# Full-Duplex Voice Agent: WanDog
 
-Fweddie is a local, full-duplex voice command agent designed to run on resource-constrained hardware (e.g., Raspberry Pi 5). It provides a low-latency "listen-think-speak" loop with native support for barge-in (interruptions) and extensible tool use via MCP.
+WanDog is a local, full-duplex voice command agent designed to run on resource-constrained hardware (e.g., Raspberry Pi 5). It provides a low-latency "listen-think-speak" loop with native support for barge-in (interruptions) and extensible tool use via MCP.
 
 > **Status (2026-11-17):** working on the Pi. Streaming partials appear while you
 > speak, the turn closes ~0.9 s after you stop, and the reply is about the
@@ -8,7 +8,7 @@ Fweddie is a local, full-duplex voice command agent designed to run on resource-
 
 ## 🏗️ System Architecture
 
-Fweddie is built on the **Pipecat** framework, utilizing a linear pipeline that transforms raw audio into spoken responses.
+WanDog is built on the **Pipecat** framework, utilizing a linear pipeline that transforms raw audio into spoken responses.
 
 ### The Voice Loop
 `Mic` $\rightarrow$ `VAD (Silero ONNX)` $\rightarrow$ `ASR (streaming zipformer + whisper final pass)` $\rightarrow$ `LLM (OnIt/vLLM)` $\rightarrow$ `TTS (Piper)` $\rightarrow$ `Speaker`
@@ -17,14 +17,20 @@ Fweddie is built on the **Pipecat** framework, utilizing a linear pipeline that 
 - **ASR (Speech-to-Text):** Streams by default, so text appears while you are
   still talking. See the Streaming ASR section below.
 - **LLM:** Connects to an OpenAI-compatible endpoint (typically a DGX cluster running vLLM) using `OpenAILLMService`.
-- **TTS (Text-to-Speech):** Uses **Piper**, a fast, local neural TTS that generates high-quality speech in real-time on CPU.
+- **TTS (Text-to-Speech):** Uses **Piper** with the **`en_US-ryan-medium`**
+  voice, a fast local neural TTS that generates high-quality speech in
+  real-time on CPU. The 61 MB ONNX model and its `.onnx.json` config are
+  fetched into `~/.piper` on first use.
 - **Barge-in:** Implemented via `LLMUserAggregator` and `VADUserTurnStartStrategy`. When the VAD detects the user speaking while the bot is talking, an `InterruptionFrame` is broadcast to immediately silence the TTS.
 
 ## 🧠 Context & Prompt Engineering
 
 ### System Prompt
-Fweddie's persona is defined in `config.py`. It is designed for **spoken** interaction:
+WanDog's persona is defined in `config.py`. It is designed for **spoken** interaction:
 - **Persona:** Friendly, upbeat, and concise.
+- **Owner:** `config.OWNER_PROMPT` tells the model it is speaking with **Ron Andrei
+  Soriano** (GitHub `raesoriano`), so "who am I", "what did I push" and "my
+  repos" resolve to him instead of "I don't know your name".
 - **Constraints:** Replies are limited to 1-2 short sentences. No markdown, bullet points, or emojis.
 - **Clock:** The prompt states the current date *and time* (`config.clock_line()`), and `ClockedLLMService` re-reads it on every inference so a long-running agent cannot drift. It is placed on the service's `system_instruction` only — putting it in the context as well sends it twice.
 - **Tool Awareness:** When MCP tools are enabled, a secondary prompt is appended, instructing the model on how to call tools, handle approvals, and report refusals without "routing around" them.
@@ -36,7 +42,7 @@ Fweddie's persona is defined in `config.py`. It is designed for **spoken** inter
 
 ## 🛠️ MCP Services (Model Context Protocol)
 
-Fweddie extends its capabilities through a bridge to **OnIt's MCP servers**, allowing the voice agent to interact with the local system and the web.
+WanDog extends its capabilities through a bridge to **OnIt's MCP servers**, allowing the voice agent to interact with the local system and the web.
 
 | Server | Profile | Capabilities |
 |---|---|---|
@@ -78,24 +84,24 @@ $EDITOR secrets.yaml          # quote every value
 
 ### News freshness
 
-`search` with `type="news"` is the path for anything current. Fweddie tunes it
+`search` with `type="news"` is the path for anything current. WanDog tunes it
 on its own side, because OnIt's news branch takes no time filter and orders by
 relevance rather than date:
 
 | Env var | Default | What it does |
 |---|---|---|
-| `FWEDDIE_MCP_NEWS_OVERFETCH` | `10` | results to request before trimming |
-| `FWEDDIE_MCP_NEWS_SORT` | `1` | sort newest-first and add an `age` field |
-| `FWEDDIE_MCP_NEWS_REFRESH_RETRIES` | `2` | extra calls when the newest hit is stale |
-| `FWEDDIE_MCP_NEWS_REFRESH_BUDGET` | `4.0` | seconds the refresh may spend |
-| `FWEDDIE_MCP_NEWS_FRESH_DAYS` | `0` | newest age that counts as fresh |
-| `FWEDDIE_MCP_NEWS_BACKEND` | `tavily` | `tavily` = Tavily first, ddgs fallback; `onit` = always ddgs |
-| `FWEDDIE_MCP_NEWS_TAVILY_DAYS` | `1` | Tavily's recency window (1-7 days) |
-| `FWEDDIE_MCP_NEWS_TAVILY_DEPTH` | `advanced` | Tavily search depth for news |
+| `WANDOG_MCP_NEWS_OVERFETCH` | `10` | results to request before trimming |
+| `WANDOG_MCP_NEWS_SORT` | `1` | sort newest-first and add an `age` field |
+| `WANDOG_MCP_NEWS_REFRESH_RETRIES` | `2` | extra calls when the newest hit is stale |
+| `WANDOG_MCP_NEWS_REFRESH_BUDGET` | `4.0` | seconds the refresh may spend |
+| `WANDOG_MCP_NEWS_FRESH_DAYS` | `0` | newest age that counts as fresh |
+| `WANDOG_MCP_NEWS_BACKEND` | `tavily` | `tavily` = Tavily first, ddgs fallback; `onit` = always ddgs |
+| `WANDOG_MCP_NEWS_TAVILY_DAYS` | `1` | Tavily's recency window (1-7 days) |
+| `WANDOG_MCP_NEWS_TAVILY_DEPTH` | `advanced` | Tavily search depth for news |
 
 Results now reach the model newest-first and carry `age` ("today", "3 days
 ago") beside `date`, so the agent says "as of today" only when that is true.
-Set `FWEDDIE_MCP_NEWS_SORT=0` to restore the server's own ordering.
+Set `WANDOG_MCP_NEWS_SORT=0` to restore the server's own ordering.
 
 #### Why news does not go to OnIt's news branch by default
 
@@ -135,7 +141,7 @@ OnIt's search chain is Tavily → DuckDuckGo and has no Ollama tier, while
 Ollama's web search is metered per call — a forwarded key would be a cost
 liability with no benefit. See `FORBIDDEN_TOOL_SECRETS` in `config.py`.
 
-Secrets are injected into the spawned subprocess only — never into Fweddie's
+Secrets are injected into the spawned subprocess only — never into WanDog's
 own process, and an ambient `export` still wins over both sources. Startup
 logs one line per key with its source and length, never its value. Note that
 the `bash` tool runs as you, so it can read `secrets.yaml`; keep high-value
@@ -143,7 +149,7 @@ tokens in the keychain.
 
 ## 📈 Evaluation & Benchmarking
 
-To ensure "full-duplex" performance, Fweddie is evaluated using the `fd-benchmark` suite.
+To ensure "full-duplex" performance, WanDog is evaluated using the `fd-benchmark` suite.
 
 ### Key Challenges & Metrics
 - **Barge-in Latency:** Measuring the delta between user speech start and bot silence.
@@ -166,7 +172,7 @@ Two models run together:
 - **sherpa-onnx streaming zipformer** (int8, RTF ≈ 0.10) decodes 20 ms chunks as they arrive and drives the live partials. It is fast but weak on numbers (`"2 plus 2"` → `"TOO PLUS"`).
 - **faster-whisper `tiny.en`** produces the authoritative final text from the same buffered audio, so accuracy does not regress. The final pass is skipped when the streaming model found no words, which stops Whisper hallucinating sentences out of noise.
 
-Both are configurable: `FWEDDIE_ASR_BACKEND` (`streaming` | `whisper`), `FWEDDIE_ASR_FINAL` (`whisper` | `none`), `FWEDDIE_ASR_FINAL_MODEL`, `FWEDDIE_TURN_STOP`.
+Both are configurable: `WANDOG_ASR_BACKEND` (`streaming` | `whisper`), `WANDOG_ASR_FINAL` (`whisper` | `none`), `WANDOG_ASR_FINAL_MODEL`, `WANDOG_TURN_STOP`.
 
 **The model weights (321 MB) are not in the repo** — `models/` is gitignored. Download once per machine:
 
@@ -176,15 +182,15 @@ curl -LO https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sher
 tar xf sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2
 ```
 
-The service names this exact command in its error message if the directory is missing. Set `FWEDDIE_ASR_BACKEND=whisper` to skip the download and use the old segmented path.
+The service names this exact command in its error message if the directory is missing. Set `WANDOG_ASR_BACKEND=whisper` to skip the download and use the old segmented path.
 
 ## 🚀 Quick Start
 
 1. **Clone** (the benchmark suite is a submodule):
    ```bash
    git clone --recurse-submodules \
-     https://github.com/raesoriano/Full-Duplex-Voice-Agent-Fweddie.git
-   cd Full-Duplex-Voice-Agent-Fweddie
+     https://github.com/raesoriano/Full-Duplex-Voice-Agent-WanDog.git
+   cd Full-Duplex-Voice-Agent-WanDog
    ```
 2. **Setup Keys:** Run `onit setup` to store API keys in the OS keychain.
 3. **Environment:**
@@ -193,6 +199,8 @@ The service names this exact command in its error message if the directory is mi
    .venv/bin/pip install -r requirements.txt
    ```
 4. **ASR model** (321 MB, one time — see Streaming ASR above).
+   **TTS voice** (`en_US-ryan-medium`, 61 MB) needs no step: Piper downloads
+   it into `~/.piper` the first time `agent.py` starts.
 5. **Run:**
    ```bash
    .venv/bin/python agent.py
@@ -224,8 +232,8 @@ A dark chat interface, modelled on the Ollama chat window, that drives the agent
 by voice **or** by typing. It is a separate process:
 
 ```
-FWEDDIE_DASHBOARD=1 .venv/bin/python agent.py          # terminal 1
-FWEDDIE_DASHBOARD_LOG=/tmp/fweddie_events.jsonl \
+WANDOG_DASHBOARD=1 .venv/bin/python agent.py          # terminal 1
+WANDOG_DASHBOARD_LOG=/tmp/wandog_events.jsonl \
   .venv/bin/python -m streamlit run dashboard.py       # terminal 2
 ```
 
@@ -251,4 +259,4 @@ The mic is blue while the agent is accepting audio and monochrome while muted.
 - **Framework:** [Pipecat](https://github.com/pipecat-ai/pipecat)
 - **TTS:** [Piper](https://github.com/rhasspy/piper)
 - **VAD:** [Silero VAD](https://github.com/snakers4/silero-vad)
-- **Internal Docs:** `Fweddie-notes.md` (Detailed development log)
+- **Internal Docs:** `WanDog-notes.md` (Detailed development log)

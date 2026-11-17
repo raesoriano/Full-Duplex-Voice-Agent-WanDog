@@ -27,7 +27,7 @@ import urllib.request
 from pathlib import Path
 
 _TMP = Path(tempfile.mkdtemp(prefix="fw_layout_"))
-os.environ["FWEDDIE_DASHBOARD_LOG"] = str(_TMP / "events.jsonl")
+os.environ["WANDOG_DASHBOARD_LOG"] = str(_TMP / "events.jsonl")
 
 import base64  # noqa: E402
 import numpy as np  # noqa: E402
@@ -40,7 +40,7 @@ ASSETS = Path(__file__).parent / "assets"
 # think wider than tall. Re-measure if a face is ever redrawn.
 ASPECT = {"idle": 0.885, "think": 1.043}
 DASHBOARD = str(Path(__file__).parent / "dashboard.py")
-LOG = Path(os.environ["FWEDDIE_DASHBOARD_LOG"])
+LOG = Path(os.environ["WANDOG_DASHBOARD_LOG"])
 CHROMIUM_PORT = 9455
 
 
@@ -242,7 +242,7 @@ class _Server:
         self.proc = None
 
     def __enter__(self) -> "_Server":
-        env = dict(os.environ, FWEDDIE_DASHBOARD_LOG=str(LOG))
+        env = dict(os.environ, WANDOG_DASHBOARD_LOG=str(LOG))
         self.proc = subprocess.Popen(
             [str(Path(__file__).parent / ".venv/bin/python"), "-m", "streamlit",
              "run", "dashboard.py", "--server.port", str(self.port),

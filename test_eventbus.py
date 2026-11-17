@@ -1,4 +1,4 @@
-"""Fweddie -- tests for the event bus and the file-based approval handshake.
+"""WanDog -- tests for the event bus and the file-based approval handshake.
 
 Covers:
   1. EventBus.emit appends JSONL events and keeps an in-memory ring.

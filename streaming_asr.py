@@ -1,4 +1,4 @@
-"""Fweddie -- streaming ASR: partial text while the user is still dictating.
+"""WanDog -- streaming ASR: partial text while the user is still dictating.
 
 Why this file exists
 --------------------
@@ -32,7 +32,7 @@ numbers: "what is 2 plus 2?" decodes as "WHAT IS TOO PLUS". faster-whisper
 ``tiny.en`` gets it exactly right in 0.86 s. So by default the streaming model
 produces the live partials and faster-whisper produces the authoritative final
 text -- both from the same audio buffer. That is the ``final_pass`` argument.
-Set it to ``None`` (``FWEDDIE_ASR_FINAL=none``) for a pure streaming path.
+Set it to ``None`` (``WANDOG_ASR_FINAL=none``) for a pure streaming path.
 
 Cost of the hybrid, measured: speech end -> final transcript ~1.6 s instead of
 ~5.5 s, and the user sees their words appear from ~1.0 s into the utterance.

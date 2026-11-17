@@ -1,4 +1,4 @@
-"""Fweddie -- resample the mic stream between the capture rate and 16 kHz.
+"""WanDog -- resample the mic stream between the capture rate and 16 kHz.
 
 Why this exists
 ---------------

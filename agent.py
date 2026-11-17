@@ -1,4 +1,4 @@
-"""Fweddie -- the heart of the voice agent.
+"""WanDog -- the heart of the voice agent.
 
 A local, full-duplex voice command agent built on Pipecat:
 
@@ -291,7 +291,7 @@ class DashboardControlWatcher(FrameProcessor):
         await super().cleanup()
 
 
-class FweddieLogger(FrameProcessor):
+class WanDogLogger(FrameProcessor):
     """Observer that prints what the agent hears and says, and records it to
     the event bus so the dashboard can show the interaction live.
 
@@ -350,7 +350,7 @@ class PartialTranscriptTap(FrameProcessor):
     The streaming ASR emits an ``InterimTranscriptionFrame`` every few hundred
     milliseconds while the user is talking. Those frames are consumed by the
     user aggregator (they never reach the tail of the pipeline), so the
-    dashboard cannot see them from ``FweddieLogger``. This tap sits between the
+    dashboard cannot see them from ``WanDogLogger``. This tap sits between the
     STT and the aggregator and forwards each partial as a ``user_partial``
     event, which the dashboard renders as a growing draft line above the chat.
 
@@ -440,9 +440,19 @@ class ClockedLLMService(OpenAILLMService):
             # after the persona rather than in front of it, and keep the rest
             # of the prompt as it stands instead of rebuilding from config --
             # rebuilding would discard any instruction a caller had added.
-            updated = (config.SYSTEM_PROMPT + " " + fresh + current[len(config.SYSTEM_PROMPT):].lstrip()
-                       if current.startswith(config.SYSTEM_PROMPT)
-                       else fresh + current)
+            #
+            # The anchor is persona+owner, not the persona alone: the owner
+            # block sits between the persona and the clock, so inserting after
+            # the persona alone would push the clock in front of it and split
+            # the "who is speaking" line from the identity it belongs to.
+            anchor = config.SYSTEM_PROMPT + " " + config.OWNER_PROMPT
+            if current.startswith(anchor):
+                updated = anchor + " " + fresh + current[len(anchor):].lstrip()
+            elif current.startswith(config.SYSTEM_PROMPT):
+                updated = (config.SYSTEM_PROMPT + " " + fresh
+                           + current[len(config.SYSTEM_PROMPT):].lstrip())
+            else:
+                updated = fresh + current
         if updated != current:
             self._settings.system_instruction = updated
             # The base prompt is the snapshot composition rebuilds from; if it
@@ -453,7 +463,7 @@ class ClockedLLMService(OpenAILLMService):
 def wire_transcript_events(user_agg, assistant_agg, bus) -> None:
     """Record the user's words and the bot's reply on the event bus.
 
-    These two texts exist only inside the aggregators (see ``FweddieLogger``),
+    These two texts exist only inside the aggregators (see ``WanDogLogger``),
     so we subscribe to the events they emit when a turn completes rather than
     trying to catch a frame that is never pushed downstream.
     """
@@ -632,7 +642,8 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     # extension was gated on tools, so an agent with tools off had no date and
     # no time AND no bash to read them with -- it could only say it did not
     # know. The clock is one line and answers "what time is it" by itself.
-    system_prompt = (config.SYSTEM_PROMPT + " " + config.clock_line()
+    system_prompt = (config.SYSTEM_PROMPT + " " + config.OWNER_PROMPT
+                     + " " + config.clock_line()
                      + " " + config.CLOCK_GUARD).strip()
     if bridge is not None:
         system_prompt = (system_prompt + " " + config.TOOLS_SYSTEM_PROMPT).strip()
@@ -729,7 +740,7 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         # no Speex), so the mic hears the speaker. The tool bridge speaks a
         # fixed line ("Searching for that.") before every tool call, and that
         # line comes back through the mic as speech: measured in
-        # /tmp/fweddie_events.jsonl, 5 of the 7 cancelled tool calls were
+        # /tmp/wandog_events.jsonl, 5 of the 7 cancelled tool calls were
         # cancelled by the agent's own announcement -- user_partial "Search"
         # -> user_text "Searching for that." 0.6-1.1s after the tool started,
         # which raises a VAD turn start, which broadcasts InterruptionFrame,
@@ -845,7 +856,7 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     # The logger observes speaking frames, which are pushed downstream all the
     # way to the end of the pipeline, so it stays last. The mic toggle is NOT
     # here: it pushes STTMuteFrame UPSTREAM, so it must sit after the STT.
-    stages.append(FweddieLogger(bus))
+    stages.append(WanDogLogger(bus))
     pipeline = Pipeline(stages)
     task = PipelineTask(pipeline)
 
@@ -888,7 +899,7 @@ async def run() -> None:
                    asr=describe_asr(),
                    tools=len(bridge.tools) if bridge else 0)
 
-    logger.info("Fweddie starting")
+    logger.info("WanDog starting")
     logger.info("  LLM : {} @ {}", config.LLM_MODEL, config.LLM_BASE_URL)
     logger.info("  ASR : {}", describe_asr())
     logger.info("  TTS : Piper {} ({})", config.PIPER_VOICE, config.PIPER_VOICE_DIR)

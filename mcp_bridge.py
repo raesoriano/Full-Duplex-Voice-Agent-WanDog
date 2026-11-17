@@ -1,19 +1,19 @@
-"""Fweddie -- OnIt MCP tool bridge.
+"""WanDog -- OnIt MCP tool bridge.
 
 Spawns OnIt's own stdio MCP servers and exposes their tools to the LLM as
-Pipecat function calls. Fweddie does NOT re-implement OnIt's tools or its
+Pipecat function calls. WanDog does NOT re-implement OnIt's tools or its
 safeguards: it talks to the real OnIt servers over the MCP protocol, so the
 AST command allowlist, the approval gate, and the DATA_PATH file jail all run
-inside the spawned server process and apply to every call Fweddie makes.
+inside the spawned server process and apply to every call WanDog makes.
 
-    Fweddie LLM  --function call-->  ToolBridgeProcessor  --MCP-->  OnIt server (stdio)
+    WanDog LLM  --function call-->  ToolBridgeProcessor  --MCP-->  OnIt server (stdio)
                                                                               |
                                                                           bash / read_file /
                                                                           search / weather ...
                                                                           (policy + jail here)
 
 Run the servers with OnIt's interpreter (it has fastmcp + mcp), from OnIt's
-package root so `src.*` imports resolve. The MCP client lives in Fweddie's own
+package root so `src.*` imports resolve. The MCP client lives in WanDog's own
 venv.
 """
 
@@ -42,7 +42,7 @@ from pipecat.services.llm_service import FunctionCallParams
 # One OnIt stdio server
 # ---------------------------------------------------------------------------
 class OnItMCPServer:
-    """A single OnIt stdio MCP server: a subprocess Fweddie owns.
+    """A single OnIt stdio MCP server: a subprocess WanDog owns.
 
     Spawned with OnIt's interpreter running `python -m src.mcp.servers.run
     --stdio ...`. The MCP session is created lazily on first use (it needs an
@@ -71,7 +71,7 @@ class OnItMCPServer:
         # Inherit the ambient environment, then pin the OnIt knobs the server
         # reads at import time. ONIT_DATA_PATH is the file jail root; the
         # allowlist stays on its default (allowlisted commands run, anything
-        # else is refused) -- Fweddie never loosens it.
+        # else is refused) -- WanDog never loosens it.
         #
         # ONIT_APPROVAL_CHANNEL=1 tells the server a person is reachable, so a
         # command the allowlist will not decide alone returns a needs_approval
@@ -81,7 +81,7 @@ class OnItMCPServer:
         #
         # ONIT_COMMAND_ALLOWLIST=1 turns the AST command allowlist on. On a
         # host (outside the onit container) it is off by default, which would
-        # let Fweddie run any executable -- the allowlist is the whole point of
+        # let WanDog run any executable -- the allowlist is the whole point of
         # the safeguard, so we pin it on.
         spawn_env = dict(os.environ)
         spawn_env["ONIT_DATA_PATH"] = config.MCP_DATA_PATH
@@ -95,7 +95,7 @@ class OnItMCPServer:
         # is a separate process and cannot read the OS keychain, so the keys
         # must travel in its environment. Resolved per server at spawn time --
         # secrets.yaml first, then the keychain -- and scoped to this
-        # subprocess only: Fweddie's own process never gets them.
+        # subprocess only: WanDog's own process never gets them.
         #
         # An ambient env var still wins, because we only fill in keys that are
         # not already present. That keeps an explicit `export` in control.
@@ -1322,7 +1322,7 @@ class ToolBridgeProcessor(FrameProcessor):
                 # Reporting our own result here would be rejected ("Ignoring
                 # result for function call ... already settled"), so this only
                 # logs. The real fix is upstream: stop the barge-in happening.
-                # Measured in /tmp/fweddie_events.jsonl: 7 tool_calls were
+                # Measured in /tmp/wandog_events.jsonl: 7 tool_calls were
                 # cancelled 0.6-4.2s after starting, all 7 of them a `search`,
                 # and 5 of the 7 were triggered by the agent's own "Searching
                 # for that." announcement being picked up by the mic.
@@ -1505,10 +1505,10 @@ class ToolBridgeProcessor(FrameProcessor):
 # ---------------------------------------------------------------------------
 def build_bridge(guard: Optional[Guard] = None) -> Optional[ToolBridgeProcessor]:
     """Construct the bridge from config.MCP_SERVERS, or None when tools are
-    disabled or the OnIt interpreter is missing (Fweddie still runs, just
+    disabled or the OnIt interpreter is missing (WanDog still runs, just
     without tools)."""
     if not config.MCP_TOOLS_ENABLED:
-        logger.info("MCP tools disabled (FWEDDIE_MCP_TOOLS=0)")
+        logger.info("MCP tools disabled (WANDOG_MCP_TOOLS=0)")
         return None
     if not os.path.exists(config.ONIT_PYTHON):
         logger.warning(

@@ -1,4 +1,4 @@
-"""Turn-context test for Fweddie: does the LLM see the CURRENT question?
+"""Turn-context test for WanDog: does the LLM see the CURRENT question?
 
 The report: the agent answers the PREVIOUS question, not the current one.
 

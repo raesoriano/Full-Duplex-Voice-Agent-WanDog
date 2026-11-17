@@ -1,7 +1,7 @@
-# Fweddie — Voice Command Agent
+# WanDog — Voice Command Agent
 
 > **Started:** 2026-11-07 · **Machine:** Raspberry Pi 5, 8 GB, aarch64, Debian 13, no GPU
-> **Repo:** `Fweddie-repo/` · **Venv:** `Fweddie-repo/.venv` (Python 3.12.16, torch-free)
+> **Repo:** `WanDog-repo/` · **Venv:** `WanDog-repo/.venv` (Python 3.12.16, torch-free)
 > **Status:** **Working** (2026-11-17). The user confirmed on real hardware:
 > "this is working nicely." Streaming partials appear while speaking, the turn
 > closes ~0.9 s after speech end, and the answer is about the question just
@@ -11,7 +11,7 @@
 
 ## 1. What this is
 
-Fweddie is a **local, full-duplex voice command agent** — the "heart" of the
+WanDog is a **local, full-duplex voice command agent** — the "heart" of the
 project. You speak into a mic; it listens, thinks, and answers out loud through
 the speaker. The rest of the pipeline (ASR, MCP tools, smart-home dashboard,
 music) is added on top of this core **later**.
@@ -28,14 +28,14 @@ mic ──▶ VAD (Silero ONNX) ──▶ LLM (OnIt, OpenAI-compatible) ──�
 | Framework | **Pipecat 1.15.0** | Full-duplex pipeline, barge-in, VAD, transports |
 | VAD | **Silero ONNX** `SileroVADAnalyzer`, owned by the `LLMUserAggregator` | Runs on `onnxruntime` (CPU) — **no torch**. In 1.15 the analyzer is *not* a standalone `VADProcessor`; it is handed to the user aggregator, whose `UserTurnController` + `VADUserTurnStartStrategy` drive barge-in (see §13) |
 | LLM | **OnIt DGX cluster** (`http://202.92.159.240:8001/v1`) via `OpenAILLMService` | OpenAI-compatible vLLM endpoint; model **`Qwen/Qwen3.8-27B`** (Ollama's free cloud models, e.g. `gemma4:31b-cloud`, are no longer available). Qwen3.8 is a *thinking* model — by default it spends its tokens on internal reasoning and returns empty `content`, so `agent.py` sends `chat_template_kwargs.enable_thinking=false` (vLLM) unless `ONIT_LLM_THINKING=1` |
-| TTS | **Piper** `en_US-lessac-medium` via `PiperTTSService` | Local, low-latency; voice already on disk |
+| TTS | **Piper** `en_US-ryan-medium` via `PiperTTSService` | Local, low-latency; Ryan voice downloaded to `/home/raesoriano/.piper` (61 MB ONNX + its `.onnx.json`), see §15 |
 | Audio I/O | `LocalAudioInput/OutputTransport` (PyAudio/ALSA) | Mic + speaker on the Pi |
-| Persona | "Fweddie" — short spoken replies, no markdown | Set in `config.py:SYSTEM_PROMPT` |
+| Persona | "WanDog" — short spoken replies, no markdown | Set in `config.py:SYSTEM_PROMPT`, with the owner block in `OWNER_PROMPT` |
 
 ### Files
 - `agent.py` — the pipeline: transport → VAD → LLM → TTS → output + a small
-  `FweddieLogger` observer that logs user/bot speech and LLM text.
-- `config.py` — every knob, overridable via env vars (`FWEDDIE_*`, `ONIT_LLM_*`).
+  `WanDogLogger` observer that logs user/bot speech and LLM text.
+- `config.py` — every knob, overridable via env vars (`WANDOG_*`, `ONIT_LLM_*`).
 - `requirements.txt` — torch-free dependency set (see §6).
 
 ## 3. Features (core, v1)
@@ -98,7 +98,7 @@ address.)
 
 ## 5. How to run
 ```bash
-cd /home/raesoriano/sandbox/Fweddie-repo
+cd /home/raesoriano/sandbox/WanDog-repo
 
 # One-time: the streaming ASR model (321 MB, gitignored)
 mkdir -p models && cd models
@@ -109,7 +109,7 @@ cd ..
 export ONIT_LLM_API_KEY=sk-...        # or rely on keychain / OPENAI_API_KEY
 .venv/bin/python agent.py
 ```
-Stop with **Ctrl+C**. Skip the download with `FWEDDIE_ASR_BACKEND=whisper`
+Stop with **Ctrl+C**. Skip the download with `WANDOG_ASR_BACKEND=whisper`
 (segmented, slower, no 321 MB).
 
 ## 6. Dependency notes (torch-free)
@@ -122,7 +122,7 @@ Stop with **Ctrl+C**. Skip the download with `FWEDDIE_ASR_BACKEND=whisper`
 
 ## 7. Safeguards (adapted from OnIt)
 
-Fweddie does **not** re-implement OnIt's safeguards. It spawns OnIt's own stdio
+WanDog does **not** re-implement OnIt's safeguards. It spawns OnIt's own stdio
 MCP servers (`mcp_bridge.py`), so the policy runs inside the spawned process
 and applies to every tool call. Three layers:
 
@@ -241,7 +241,7 @@ first two entries were days old. The cause is that `ddgs.news` orders by
 prefix decided the answer. The same five-result page measured 17, 12, 17, 14,
 11 Nov, with the two same-day stories sitting third and fifth.
 
-Three fixes, all on Fweddie's side (OnIt's `search` has no `timelimit` and we
+Three fixes, all on WanDog's side (OnIt's `search` has no `timelimit` and we
 do not edit it):
 
 1. **Over-fetch, then trim.** `_shape_search_args` asks for
@@ -284,7 +284,7 @@ unparseable. `test_news_tavily.py` (8 groups) now pins the date shapes, the sort
 the cap, the backend switch and the echo guard.
 
 **Why searches were being cancelled.** 7 of 62 tool calls in
-`/tmp/fweddie_events.jsonl` were cancelled before returning, all 7 of them a
+`/tmp/wandog_events.jsonl` were cancelled before returning, all 7 of them a
 `search`, 0.59–4.22s after starting. Five were triggered by the agent's *own*
 spoken announcement: `_ANNOUNCEMENTS["search"]` is `"Searching for that."`, sent
 as a `TTSSpeakFrame`; the mic heard it, the transcript read `"Searching for
@@ -373,11 +373,11 @@ had, which was the previous question.
   nog?"`) out of a silent segment and put it in the prompt as if the user said it.
 - Model weights: 321 MB, downloaded into `models/` (gitignored). The service
   raises a `FileNotFoundError` naming the exact `curl` command when missing.
-  `FWEDDIE_ASR_BACKEND=whisper` restores the old segmented path with no download.
-- Knobs: `FWEDDIE_ASR_BACKEND`, `FWEDDIE_ASR_FINAL`, `FWEDDIE_ASR_FINAL_MODEL`,
-  `FWEDDIE_ASR_PREROLL` (1.0 s kept from before the VAD fires, so the decoder does
-  not start mid-word), `FWEDDIE_ASR_THREADS` (2 -- the Pi also runs VAD, the LLM
-  client and Piper), `FWEDDIE_TURN_STOP` (1.0 s speech-timeout).
+  `WANDOG_ASR_BACKEND=whisper` restores the old segmented path with no download.
+- Knobs: `WANDOG_ASR_BACKEND`, `WANDOG_ASR_FINAL`, `WANDOG_ASR_FINAL_MODEL`,
+  `WANDOG_ASR_PREROLL` (1.0 s kept from before the VAD fires, so the decoder does
+  not start mid-word), `WANDOG_ASR_THREADS` (2 -- the Pi also runs VAD, the LLM
+  client and Piper), `WANDOG_TURN_STOP` (1.0 s speech-timeout).
 - **Rejected:** the 20M zipformer returned empty strings on this mic's audio. The
   2023-06-26 model works on every capture. `WhisperSTTService`'s segmented
   default remains available for A/B.
@@ -390,7 +390,7 @@ transcript decoded but never reached `LLMUserAggregator`. See section 12(b).
 ## 9. Dashboard (Streamlit, LAN-reachable)
 
 `dashboard.py` is a separate Streamlit process that shows the live interaction
-from any device on the LAN: a running transcript (your words + Fweddie's
+from any device on the LAN: a running transcript (your words + WanDog's
 replies), the OnIt tools the agent calls and their results, and a live
 **approval panel** where you approve/deny a pending command with a button.
 
@@ -399,9 +399,9 @@ Streamlit/Flask API, so it is robust):
 
 | File | Writer | Reader | Purpose |
 |---|---|---|---|
-| `/tmp/fweddie_events.jsonl` | agent | dashboard | the interaction record (one JSON per line) |
-| `/tmp/fweddie_events.jsonl.pending.json` | agent | dashboard | a command awaiting approval |
-| `/tmp/fweddie_events.jsonl.decision.json` | dashboard | agent | the person's decision (once/session/deny) |
+| `/tmp/wandog_events.jsonl` | agent | dashboard | the interaction record (one JSON per line) |
+| `/tmp/wandog_events.jsonl.pending.json` | agent | dashboard | a command awaiting approval |
+| `/tmp/wandog_events.jsonl.decision.json` | dashboard | agent | the person's decision (once/session/deny) |
 
 - The agent appends events via `eventbus.EventBus` (best-effort; a full disk
   never crashes the voice loop). Events: `session_start/end`, `user_text`,
@@ -411,7 +411,7 @@ Streamlit/Flask API, so it is robust):
   and, on button click, writes the decision. If the dashboard is never up, the
   Guard falls back to the **console** prompt, so approvals never block on the
   browser. (Fail-closed: no decision by the timeout = deny.)
-- Turn it on with `FWEDDIE_DASHBOARD=1` (off by default). The agent writes the
+- Turn it on with `WANDOG_DASHBOARD=1` (off by default). The agent writes the
   event log regardless, so a dashboard started later still shows the session.
 
 Run the dashboard (from the repo, in the venv):
@@ -439,7 +439,7 @@ Verified by live capture: the PnP card (index 0) returns real audio on
 capture; the Composite card (index 1) is silent (it is the playback/speaker
 device). `config.py` sets `INPUT_DEVICE_INDEX=0` and `OUTPUT_DEVICE_INDEX=1`
 by default and passes them to `LocalAudioTransportParams`. Override with
-`FWEDDIE_IN_DEVICE` / `FWEDDIE_OUT_DEVICE` (an empty value = system default).
+`WANDOG_IN_DEVICE` / `WANDOG_OUT_DEVICE` (an empty value = system default).
 
 ## 11. LLM: DGX Qwen3.8-27B (post-Ollama-cloud)
 - Ollama ended its free cloud models, so the LLM is the on-prem DGX cluster:
@@ -533,7 +533,7 @@ old int16-amplitude value `400`. The state machine requires
 `confidence >= VAD_CONFIDENCE AND volume >= VAD_MIN_VOLUME`, so
 `volume (0–1) >= 400` was *always* False → VAD never reached SPEAKING → no
 barge-in even with the wiring. **Fix:** `VAD_MIN_VOLUME` is now a float, default
-`0.6` (the Pipecat default), overridable via `FWEDDIE_VAD_MIN_VOLUME`.
+`0.6` (the Pipecat default), overridable via `WANDOG_VAD_MIN_VOLUME`.
 
 **Verification** (`test_bargein.py`):
 1. **Wiring** — the real `build_pipeline` output contains an
@@ -568,7 +568,7 @@ barge-in even with the wiring. **Fix:** `VAD_MIN_VOLUME` is now a float, default
 - [ ] Add **music** (YouTube download + playback) as an OnIt tool.
 - [ ] Tune VAD thresholds (`confidence`, `stop_secs`) and TTS volume for the room.
 - [ ] Decide on a wake word / "always listening" policy.
-- [ ] (Optional) Voice the approval prompt: have Fweddie *say* "I need approval
+- [ ] (Optional) Voice the approval prompt: have WanDog *say* "I need approval
       to run X" and take the answer by ASR, instead of the dashboard button /
       console. The Guard's `prompt` is a pluggable callback, so it's a drop-in.
 
@@ -977,3 +977,63 @@ right.
 
 `test_pipeline_asr.py` still fails its 2.5 s budget (5.83 s here). Pre-existing and
 unrelated: stashing this change and re-running gives 6.06 s.
+
+## 15. The TTS voice is Piper Ryan, and the agent knows who it is talking to
+
+Both changes are on branch `TTS-Ryan-raesoriano-WanDog`.
+
+### The voice
+
+`config.PIPER_VOICE` is now `en_US-ryan-medium` (was `en_US-lessac-medium`).
+Piper's voices ship as a pair -- the ONNX graph and a `.onnx.json` beside it
+holding the phoneme map and the sample rate -- and `PiperTTSService` downloads
+both into `PIPER_VOICE_DIR` on first use if they are absent.
+
+| | |
+|---|---|
+| file | `en_US-ryan-medium.onnx` |
+| size | 63,221,984 B (61 MB) -- under the 200 MB budget, so it was fetched |
+| config | `en_US-ryan-medium.onnx.json`, 5,466 B |
+| location | `/home/raesoriano/.piper/` |
+| sample rate | 22,050 Hz, which the output transport resamples to 48 kHz as before |
+
+Verified by loading it outside the pipeline: `PiperVoice.load()` returns a voice
+reporting `config.sample_rate == 22050`, and synthesizing a sentence yields
+115,200 bytes of int16 -- so the model is intact, not just downloaded.
+
+Ryan also exists as `low` (63.1 MB) and `high` (120.8 MB). Medium was chosen to
+match the quality tier of the voice it replaces; `high` is still under the budget
+if the extra 58 MB is ever worth it.
+
+### The owner block
+
+`config.OWNER_PROMPT` sits between the persona and the clock:
+
+    SYSTEM_PROMPT + " " + OWNER_PROMPT + " " + clock_line() + " " + CLOCK_GUARD
+
+It states the name (Ron Andrei Soriano) and the GitHub handle (raesoriano), and
+resolves "I / me / my" -- including "my repos" -- to him. Without it the model
+answers "I don't know your name", which is true from its point of view: nothing
+in the prompt ever said.
+
+**One thing that had to change with it.** `ClockedLLMService._refresh_clock()`
+rebuilds the prompt when it cannot find a clock sentence to replace, and it used
+to splice at `len(config.SYSTEM_PROMPT)` -- the end of the persona. With the
+owner block now sitting there, that splice would drop the clock *between* the
+persona and the owner line, leaving "who you are speaking with" attached to the
+wrong paragraph. The anchor is persona+owner, with the old persona-only path kept
+as a fallback for a prompt built by something else. Confirmed by stripping the
+clock from a real pipeline prompt and re-running the refresh: the owner line
+survives, appears once, and the clock lands after it.
+
+### Identity and the tools
+
+`test_tool_secrets_live.py` reaches the spawned MCP subprocesses and reports the
+keys they carry: `GITHUB_TOKEN`, `OPENWEATHERMAP_API_KEY`, `TAVILY_API_KEY`,
+`HF_TOKEN`, on both servers, and a live `get_weather` call through the bridge
+returns real data -- so the keys are not merely in the file, they arrive. The
+GitHub token in `secrets.yaml` authenticates as **raesoriano** and holds admin on
+`Full-Duplex-Voice-Agent-Fweddie`, which is what the `github_repo` tool and a
+`git push` from the `bash` tool need.
+
+`secrets.yaml` stays gitignored; only `secrets.example.yaml` is tracked.

@@ -196,7 +196,7 @@ async def main() -> int:
     wavs = sys.argv[1:] or [
         "/tmp/q_math.wav",
         "/tmp/q_dog.wav",
-        "/tmp/fweddie_diag_mic.wav",
+        "/tmp/wandog_diag_mic.wav",
     ]
     results = []
     for path in wavs:

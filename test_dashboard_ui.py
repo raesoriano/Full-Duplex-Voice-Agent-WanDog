@@ -25,12 +25,12 @@ from pathlib import Path
 
 # Point the dashboard at a private log BEFORE it (or config) is imported.
 _TMP = Path(tempfile.mkdtemp(prefix="fw_dash_"))
-os.environ["FWEDDIE_DASHBOARD_LOG"] = str(_TMP / "events.jsonl")
+os.environ["WANDOG_DASHBOARD_LOG"] = str(_TMP / "events.jsonl")
 
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 DASHBOARD = str(Path(__file__).parent / "dashboard.py")
-LOG = Path(os.environ["FWEDDIE_DASHBOARD_LOG"])
+LOG = Path(os.environ["WANDOG_DASHBOARD_LOG"])
 TYPED = Path(str(LOG) + ".typed.json")
 STOP = Path(str(LOG) + ".stop.json")
 # From config, never guessed: the mic file is named differently from the

@@ -1,4 +1,4 @@
-"""Live end-to-end check: does Fweddie's spawned OnIt 'net' MCP server
+"""Live end-to-end check: does WanDog's spawned OnIt 'net' MCP server
 serve the `search` tool, and does it return real results?
 
 Run: .venv/bin/python test_search_live.py

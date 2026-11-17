@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fweddie -- is the microphone actually hearing you?
+"""WanDog -- is the microphone actually hearing you?
 
 Run this, say something, and read the verdict. It uses the exact capture
 rate, resampler, VAD settings and Whisper model the agent uses, so a PASS
@@ -18,7 +18,7 @@ Interpretation guide:
   RMS < 0.002                 -> the mic is essentially silent. Hardware,
                                  gain, or the wrong device. Not a code bug.
   RMS >= 0.01, no VAD frames  -> VAD thresholds too strict for this room;
-                                 lower FWEDDIE_VAD_CONFIDENCE.
+                                 lower WANDOG_VAD_CONFIDENCE.
   VAD fires, transcript empty -> speech is too faint/muffled for Whisper;
                                  move closer or raise the gain.
   Transcript has words        -> the input path is fine.
@@ -37,13 +37,13 @@ import config
 
 CAPTURE_RATE = 48000
 CHUNK = 1920  # 20 ms at 48 kHz, mono, s16
-WAV_PATH = "/tmp/fweddie_diag_mic.wav"
+WAV_PATH = "/tmp/wandog_diag_mic.wav"
 
 
 def report_gain() -> None:
     print("1. MIC GAIN")
     if not config.MIC_CARD:
-        print("   (skipped: FWEDDIE_MIC_CARD is empty)")
+        print("   (skipped: WANDOG_MIC_CARD is empty)")
         return
     try:
         r = subprocess.run(
@@ -97,7 +97,7 @@ def main() -> int:
     args = ap.parse_args()
 
     print("=" * 62)
-    print("Fweddie microphone diagnostic")
+    print("WanDog microphone diagnostic")
     print("=" * 62)
 
     report_gain()
@@ -153,7 +153,7 @@ def main() -> int:
     if speech == 0:
         print("   VERDICT: VAD never fired. Either you were silent, or the")
         print("   thresholds are too strict. Try:")
-        print("     FWEDDIE_VAD_CONFIDENCE=0.2 FWEDDIE_VAD_MIN_VOLUME=0.2 \\")
+        print("     WANDOG_VAD_CONFIDENCE=0.2 WANDOG_VAD_MIN_VOLUME=0.2 \\")
         print("       .venv/bin/python diag_mic.py")
         return 1
     print("   OK: VAD detected speech.")

@@ -80,11 +80,11 @@ def _shown(out: str) -> int:
 def local_search_payload(n: int = 5) -> str:
     return json.dumps({
         "query": "result cap", "method": "hybrid",
-        "results": [{"rank": i, "score": 9.5 - i, "file": "Fweddie-notes.md",
+        "results": [{"rank": i, "score": 9.5 - i, "file": "WanDog-notes.md",
                      "location": f"lines {i * 10}-{i * 10 + 8}",
                      "text": "some matched chunk text about the news cap " * 4}
                     for i in range(1, n + 1)],
-        "documents": [{"file": "Fweddie-notes.md", "best_rank": 1,
+        "documents": [{"file": "WanDog-notes.md", "best_rank": 1,
                        "matched_at": "lines 150-160",
                        "opening": "The latest-news fixes: does a search result "
                                   "reach the model intact and dated? Three "

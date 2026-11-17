@@ -1,10 +1,10 @@
-# Streamlit settings for the Fweddie dashboard.
+# Streamlit settings for the WanDog dashboard.
 #
 # NOTE: the palette does NOT live here. Streamlit's theme is fixed when the
 # server starts -- st._config.set_option("theme.base", ...) from a running script
 # does not repaint, and Streamlit caches the active theme in localStorage, so a
 # server-side change is ignored on the next load. Measured; see the "Dashboard v2"
-# section of Fweddie-notes.md.
+# section of WanDog-notes.md.
 #
 # The dashboard therefore carries its own light and dark palettes as CSS custom
 # properties in dashboard.py and picks one server-side, so the first paint is

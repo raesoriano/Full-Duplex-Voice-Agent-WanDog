@@ -24,7 +24,7 @@ import asyncio
 import config
 
 SYSTEM = (
-    "You are Fweddie, a friendly voice assistant. Answer the user's most "
+    "You are WanDog, a friendly voice assistant. Answer the user's most "
     "recent message only. One short sentence."
 )
 

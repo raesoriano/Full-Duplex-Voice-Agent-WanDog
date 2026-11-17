@@ -1,4 +1,4 @@
-"""Fweddie -- Streamlit dashboard: a chat interface with voice and text.
+"""WanDog -- Streamlit dashboard: a chat interface with voice and text.
 
 Modelled on the Ollama chat window: one column of messages, a composer pinned at
 the bottom, and the controls inside the composer rather than in a sidebar. The
@@ -80,12 +80,12 @@ ASSETS = Path(__file__).parent / "assets"
 #   husky-think -- muzzle up. The bar's face while a turn is in flight.
 #   husky-32    -- the favicon.
 # Rasters, not SVG: tracing the drawings produced blobs (the eyes fused with the
-# muzzle). See "The husky icons are three committed PNGs" in Fweddie-notes.md.
+# muzzle). See "The husky icons are three committed PNGs" in WanDog-notes.md.
 HUSKY_IDLE_PNG = ASSETS / "husky-idle.png"
 HUSKY_THINK_PNG = ASSETS / "husky-think.png"
 
 st.set_page_config(
-    page_title="Fweddie",
+    page_title="WanDog",
     page_icon=str(ASSETS / "husky-32.png") if (ASSETS / "husky-32.png").exists() else None,
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -802,7 +802,7 @@ with st.container(key="topbar"):
                     <img class="fw-face-think" src="{husky_think_uri}" alt="" />
                   </span>
                   <div>
-                    <div class="fw-name">Fweddie</div>
+                    <div class="fw-name">WanDog</div>
                     <div class="fw-sub">{subtitle}</div>
                   </div>
                 </div>""",
@@ -892,7 +892,7 @@ def render_event(ev: dict) -> None:
             f"""<div class="fw-row">
               <div class="fw-av fw-av-bot"><img src="{husky_idle_uri}" alt="" /></div>
               <div class="fw-body">
-                <div class="fw-who">Fweddie</div>
+                <div class="fw-who">WanDog</div>
                 <div class="fw-text">{_esc(ev.get("text", ""))}</div>
                 <div class="fw-meta">{ts}</div>
               </div></div>""",
@@ -1315,7 +1315,7 @@ with st.container(key="composer"):
             key="txt",
             height=44,
             label_visibility="collapsed",
-            placeholder="Message Fweddie, or just start talking\u2026",
+            placeholder="Message WanDog, or just start talking\u2026",
         )
 
     with c_send:

@@ -1,4 +1,4 @@
-# Fweddie — Plan for the Next Steps
+# WanDog — Plan for the Next Steps
 
 **Date:** November 17, 2026
 **Branch:** `next-steps` (created from `f4836c85`, the confirmed-working baseline)
@@ -18,7 +18,7 @@ remembered. The evidence base:
 
 | Evidence                                    | What it showed             |
 |---------------------------------------------|----------------------------|
-| `/tmp/fweddie_events.jsonl` (191 events)    | `session_start` reports    |
+| `/tmp/wandog_events.jsonl` (191 events)    | `session_start` reports    |
 |                                             | **`tools: 14`**            |
 | same log, events 99-100                     | `get_weather` called,      |
 |                                             | result returned, **no      |
@@ -69,7 +69,7 @@ OnIt's `default.yaml` lists four servers, but only two serve tools: the `local`
 profile (everything above except the two in `NET_TOOLS`) and the `net` profile
 (`search`, `get_weather`). `PromptsMCPServer` serves prompt templates, not tools;
 `SkillsMCPServer` is `enabled: false` and serves nothing until the autonomy level
-is `extend`. So Fweddie's two-server wiring is **complete**, and there is no
+is `extend`. So WanDog's two-server wiring is **complete**, and there is no
 missing tool to add. What is missing is proof and a guard against drift — see §1.1.
 
 **B. The failure is specific: the turn dies at `tool_result`.**
@@ -197,7 +197,7 @@ result visibly differ, which makes §1.2 Layer 3 honest rather than hidden.
 Add `test_tool_parity.py`: enumerate the tool names OnIt's servers advertise over
 MCP, compare to a checked-in expected list of 14, and fail on any difference. Run it
 in CI and at agent start-up (log-only at start-up, failing in the test). Without
-this, a future OnIt release that adds a tool would silently leave Fweddie behind —
+this, a future OnIt release that adds a tool would silently leave WanDog behind —
 which is the actual risk behind "make sure it can use the same tools".
 
 ### 1.5 Acceptance criteria — all met, verified 17 Nov 2026
@@ -394,7 +394,7 @@ So this is a from-scratch first run, not a re-run.
 ### 3.2 The adapter is the real work
 
 `fd-benchmark` starts the assistant with a benchmark transport instead of a mic and
-speaker. `adapters/assistant_entry_template.py` has three fill-ins, and Fweddie
+speaker. `adapters/assistant_entry_template.py` has three fill-ins, and WanDog
 already satisfies the hard one:
 
 ```python
@@ -427,7 +427,7 @@ session at 2 a.m.
 
 1. `git submodule update --init` (already done — verify, don't re-clone).
 2. Create `fd-benchmark/.venv` and install its `requirements.txt` — **separate from
-   Fweddie's venv**, which is the point of the split.
+   WanDog's venv**, which is the point of the split.
 3. `python tools/fetch_datasets.py` — downloads the ready-built set (~30 MB).
 4. Write `fd-benchmark/assistant_entry.py` from the template (it is git-ignored).
 5. `PROJECT_PYTHON launch_assistant.py --check` must print **READY**. Do not proceed
@@ -460,7 +460,7 @@ in the repo root. The latter is cleaner and keeps the submodule's own git out of
 
 ### 3.5 What the numbers mean for this project
 
-The benchmark scores turn-taking, latency, and interruption. Fweddie's known
+The benchmark scores turn-taking, latency, and interruption. WanDog's known
 weakness is exactly in scope: the handover's §12 records `test_pipeline_asr.py`
 measuring **2.77 s against a 2.5 s budget**. The benchmark will produce its own
 independent latency figure — and if it agrees with 2.77 s, that settles the "is it
@@ -502,7 +502,7 @@ Two constraints follow from that and shape the whole task:
 
 ```
 +-------------------------------------------------------------+
-|  Fweddie                                      [session info]|
+|  WanDog                                      [session info]|
 |                                                              |
 |   [ transcript, scrolls, auto-refreshing ]                   |
 |                                                              |
@@ -716,7 +716,7 @@ Task 4 (dashboard UI) ──► Task 5 (upload + mode)  [plan only]
 `main` stays at `f4836c85`. Every task above lands on `next-steps` as its own commit
 with the test that proves it, so any single task can be reverted without touching the
 others. The first commit on `next-steps` should be this plan plus the two doc edits
-the handover left uncommitted (`Fweddie-notes.md`, `README.md`), so the branch starts
+the handover left uncommitted (`WanDog-notes.md`, `README.md`), so the branch starts
 clean and the diff for each task stands alone.
 
 ## 8. What this plan does not do
