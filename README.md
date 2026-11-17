@@ -26,6 +26,7 @@ Fweddie is built on the **Pipecat** framework, utilizing a linear pipeline that 
 Fweddie's persona is defined in `config.py`. It is designed for **spoken** interaction:
 - **Persona:** Friendly, upbeat, and concise.
 - **Constraints:** Replies are limited to 1-2 short sentences. No markdown, bullet points, or emojis.
+- **Clock:** The prompt states the current date *and time* (`config.clock_line()`), and `ClockedLLMService` re-reads it on every inference so a long-running agent cannot drift. It is placed on the service's `system_instruction` only — putting it in the context as well sends it twice.
 - **Tool Awareness:** When MCP tools are enabled, a secondary prompt is appended, instructing the model on how to call tools, handle approvals, and report refusals without "routing around" them.
 
 ### Context Management
