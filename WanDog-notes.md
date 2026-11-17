@@ -1033,7 +1033,24 @@ keys they carry: `GITHUB_TOKEN`, `OPENWEATHERMAP_API_KEY`, `TAVILY_API_KEY`,
 `HF_TOKEN`, on both servers, and a live `get_weather` call through the bridge
 returns real data -- so the keys are not merely in the file, they arrive. The
 GitHub token in `secrets.yaml` authenticates as **raesoriano** and holds admin on
-`Full-Duplex-Voice-Agent-Fweddie`, which is what the `github_repo` tool and a
-`git push` from the `bash` tool need.
+the repo, which is what the `github_repo` tool and a `git push` from the `bash`
+tool need.
+
+### The rename
+
+`Fweddie` became `WanDog` everywhere: 26 tracked files, `FweddieLogger` ->
+`WanDogLogger`, `Fweddie-notes.md` -> `WanDog-notes.md`, and the configuration
+prefix `FWEDDIE_` -> `WANDOG_` across 98 variable names. The GitHub repo was
+renamed `Full-Duplex-Voice-Agent-Fweddie` -> `Full-Duplex-Voice-Agent-WanDog`
+(GitHub redirects the old URL, so an existing clone still fetches), and the
+local checkout `Fweddie-repo/` -> `WanDog-repo/`.
+
+The directory rename is the one part that is not just a `mv`: a venv records its
+own absolute path in the shebang of every script under `.venv/bin` and in
+`pyvenv.cfg`. Fifty scripts were rewritten to the new path, and
+`.venv/bin/python -c "import agent"` was run afterwards to prove the interpreter
+still resolves its packages. Leftover `.pyc` files inside `.venv` still carry the
+old path in their embedded filenames; that is harmless, they are byte-code caches
+and get rewritten when their source is next compiled.
 
 `secrets.yaml` stays gitignored; only `secrets.example.yaml` is tracked.
