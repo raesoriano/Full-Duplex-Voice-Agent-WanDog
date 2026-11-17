@@ -74,8 +74,14 @@ STOP_FILE = Path(config.DASHBOARD_STOP_FILE)
 CLEAR_FILE = Path(config.DASHBOARD_CLEAR_FILE)
 
 ASSETS = Path(__file__).parent / "assets"
-HUSKY_SVG = ASSETS / "husky.svg"
-HUSKY_PNG = ASSETS / "husky.png"
+# Two faces, cut from one reference sheet by tools/make_husky.py:
+#   husky-idle  -- mouth open, tongue out. The bar's resting state, and the
+#                  avatar beside every reply.
+#   husky-think -- muzzle up. The bar's face while a turn is in flight.
+# Rasters, not SVG: the drawings are 112-125 px of a photograph of a drawing,
+# and contour tracing them produced blobs (see tools/make_husky.py).
+HUSKY_IDLE_PNG = ASSETS / "husky-idle.png"
+HUSKY_THINK_PNG = ASSETS / "husky-think.png"
 
 st.set_page_config(
     page_title="Fweddie",
@@ -258,7 +264,21 @@ header[data-testid="stHeader"] { display: none !important; }
     display: flex; align-items: center; gap: .6rem;
     margin: 0;
 }
-.fw-head img { width: 30px; height: 30px; display: block; border-radius: 50%; }
+/* The face: two images stacked, one visible. Both are the same box, so the
+   name plate never shifts when the icon changes, and both are already decoded
+   when the swap happens (see the identity fragment). The idle face is the one
+   with the tongue out; the thinking face is the one looking up. */
+.fw-face { position: relative; width: 30px; height: 30px; flex: 0 0 30px; display: block; }
+.fw-face img {
+    position: absolute; inset: 0; width: 30px; height: 30px;
+    display: block; object-fit: contain;
+    transition: opacity .18s ease;
+}
+/* The thinking face is a little wider than it is tall, so it is inset by a
+   pixel to read the same size as the idle one. */
+.fw-face .fw-face-think { opacity: 0; transform: scale(.96); }
+.fw-head.fw-busy .fw-face-idle { opacity: 0; }
+.fw-head.fw-busy .fw-face-think { opacity: 1; transform: scale(1); }
 .fw-head .fw-name { font-size: 1.02rem; font-weight: 600; letter-spacing: .01em; }
 .fw-head .fw-sub { font-size: .74rem; color: var(--fw-muted); margin-top: -1px; }
 
@@ -304,12 +324,46 @@ header[data-testid="stHeader"] { display: none !important; }
     margin-top: var(--fw-top-pad, 7.4rem);
     height: var(--fw-scroll-h, calc(100vh - 13.5rem));
     max-height: var(--fw-scroll-h, calc(100vh - 13.5rem));
+
+    /* FULL BLEED, so the scrollbar lands on the window's right edge.
+       -----------------------------------------------------------------
+       Measured before this: the box was x=206..994 inside a 1200 px window,
+       because it inherits Streamlit's 820 px centred column. The scrollbar
+       therefore sat 206 px from the right edge -- not where a window's own
+       scrollbar is, and not where the reader's eye expects it after scrolling a
+       full-width page.
+       The box is now pulled out to the viewport (negative margin of exactly the
+       column's own left offset, which is what `50% - 50vw` computes) and the
+       CONTENT is put back in an 820 px column by the child rule below. One
+       scroller, still, and it ends above the composer -- the thumb never
+       travels under the composer's gradient. */
+    width: 100vw;
+    /* max-width is required, not decoration: Streamlit's own .stVerticalBlock
+       carries `max-width: 100%`, which clamped 100vw straight back to the 820 px
+       column (measured: width 788 px, the column's content box, with the box
+       starting at x=0 and ending at 788 in a 1200 px window). */
+    max-width: 100vw !important;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    box-sizing: border-box;
+    padding-left: 0;
+    padding-right: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    /* A gutter on the right only, so showing/hiding the scrollbar cannot shift
-       the text sideways by half a line. */
+    /* The gutter is stable so the text does not shift sideways by half a line
+       when the transcript grows past one screen. */
     scrollbar-gutter: stable;
-    padding-right: .3rem;
+}
+/* The reading column. The scroller's child is Streamlit's layout wrapper (not
+   the vertical block -- that is one level further in, and a selector for it here
+   matched nothing), and constraining the wrapper is what keeps the text at the
+   width of the bar and the composer while the scroller itself is full width. */
+.st-key-transcript > [data-testid="stLayoutWrapper"] {
+    max-width: 820px;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1rem;
+    padding-right: 1rem;
 }
 /* Keep the newest message clear of the composer even when the view is at the
    very bottom of the scroll. */
@@ -658,19 +712,21 @@ def turn_in_flight(events: list) -> bool:
 # Header: identity, theme toggle, clear history
 # ---------------------------------------------------------------------------
 
-# The icon is inline SVG rather than a PNG, for two reasons: it stays sharp at
-# any zoom or device pixel ratio, and its colours come from the file itself, so
-# the two-tone (white face, dark outline and markings) works on both palettes
-# without a second asset. The PNGs in assets/ are only the favicon, which has to
-# be raster.
-husky_uri = ""
-if HUSKY_SVG.exists():
-    import base64
+# Both faces are inlined as data URIs rather than served as files: the page has
+# no static route to assets/, and a data URI cannot 404 or be cached stale while
+# the icon is being re-cut. Each is 192 px wide and drawn at 26-30 px, so it
+# survives any device pixel ratio.
+import base64
 
-    husky_uri = (
-        "data:image/svg+xml;base64,"
-        + base64.b64encode(HUSKY_SVG.read_bytes()).decode()
-    )
+
+def _data_uri(path: Path) -> str:
+    if not path.exists():
+        return ""
+    return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
+
+
+husky_idle_uri = _data_uri(HUSKY_IDLE_PNG)
+husky_think_uri = _data_uri(HUSKY_THINK_PNG)
 
 events = read_events()
 session = next((e for e in reversed(events) if e.get("kind") == "session_start"), None)
@@ -692,16 +748,38 @@ with st.container(key="topbar"):
     h_name, h_theme, h_clear = st.columns([8.4, 0.8, 0.8], vertical_alignment="center")
 
     with h_name:
-        st.markdown(
-            f"""<div class="fw-head">
-              <img src="{husky_uri}" alt="" />
-              <div>
-                <div class="fw-name">Fweddie</div>
-                <div class="fw-sub">{subtitle}</div>
-              </div>
-            </div>""",
-            unsafe_allow_html=True,
-        )
+
+        @st.fragment(run_every=1.0)
+        def identity() -> None:
+            """The name plate, with a face that changes with the turn.
+
+            This has to be a fragment: the icon is the one thing in the bar that
+            has to move on its own, and the rest of the bar (theme switch, Clear,
+            status line) must not re-run on a timer. run_every=1.0 is the same
+            cadence the transcript uses, so the two agree.
+
+            Both images are always in the DOM and CSS decides which is visible
+            (.fw-face-idle / .fw-face-think under [data-busy]). Swapping the
+            src instead would leave a frame with no image while the new data URI
+            decodes, which at 30 px is a visible blink.
+            """
+            busy = turn_in_flight(read_events())
+            cls = "fw-head fw-busy" if busy else "fw-head"
+            st.markdown(
+                f"""<div class="{cls}" data-busy="{'1' if busy else '0'}">
+                  <span class="fw-face">
+                    <img class="fw-face-idle" src="{husky_idle_uri}" alt="" />
+                    <img class="fw-face-think" src="{husky_think_uri}" alt="" />
+                  </span>
+                  <div>
+                    <div class="fw-name">Fweddie</div>
+                    <div class="fw-sub">{subtitle}</div>
+                  </div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+        identity()
 
     with h_theme:
         # The glyph is the theme you would switch TO, which is the OnIt
@@ -782,7 +860,7 @@ def render_event(ev: dict) -> None:
     elif kind == "bot_text":
         st.markdown(
             f"""<div class="fw-row">
-              <div class="fw-av fw-av-bot"><img src="{husky_uri}" alt="" /></div>
+              <div class="fw-av fw-av-bot"><img src="{husky_idle_uri}" alt="" /></div>
               <div class="fw-body">
                 <div class="fw-who">Fweddie</div>
                 <div class="fw-text">{_esc(ev.get("text", ""))}</div>

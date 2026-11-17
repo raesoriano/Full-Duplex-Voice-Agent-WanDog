@@ -29,8 +29,11 @@ from pathlib import Path
 _TMP = Path(tempfile.mkdtemp(prefix="fw_layout_"))
 os.environ["FWEDDIE_DASHBOARD_LOG"] = str(_TMP / "events.jsonl")
 
+import base64  # noqa: E402
+import numpy as np  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
+ASSETS = Path(__file__).parent / "assets"
 DASHBOARD = str(Path(__file__).parent / "dashboard.py")
 LOG = Path(os.environ["FWEDDIE_DASHBOARD_LOG"])
 CHROMIUM_PORT = 9455
@@ -99,13 +102,13 @@ def test_transcript_is_its_own_scroll_box() -> None:
     print("2. the transcript renders inside its own container   OK")
 
 
-def test_avatar_is_svg_not_png() -> None:
-    """The avatar must be the SVG.
+def test_avatar_is_the_idle_face() -> None:
+    """The avatar beside a reply must be the tongue-out face, always.
 
-    The PNG is a fixed raster: at 26 px in light mode its dark outline is the
-    only thing that carries the shape, and downscaling blurs exactly that line.
-    The SVG also carries its own two colours, so one file works on both
-    palettes.
+    Not the thinking face, and not the same image the bar happens to be showing:
+    the avatar is who is speaking, the bar's face is what it is doing. Two
+    different questions, two different images, and the avatar's must not flicker
+    with the turn.
     """
     _seed(
         {"kind": "session_start", "ts": time.time() - 9},
@@ -115,29 +118,65 @@ def test_avatar_is_svg_not_png() -> None:
     at = AppTest.from_file(DASHBOARD, default_timeout=60).run()
     assert not list(at.exception), list(at.exception)
     blob = "\n".join(m.value for m in at.markdown)
-    assert "data:image/svg+xml;base64," in blob, (
-        "the avatar is not the SVG: " + blob[blob.find("img src") :][:80]
-    )
-    assert "data:image/png;base64," not in blob, "a PNG avatar is still in use"
-    print("3. the avatar is the inline SVG                      OK")
+
+    idle = base64.b64encode((ASSETS / "husky-idle.png").read_bytes()).decode()
+    think = base64.b64encode((ASSETS / "husky-think.png").read_bytes()).decode()
+    assert idle in blob, "the avatar is not the idle face"
+
+    # Check the bot row itself, not a slice of the whole blob: splitting on
+    # "fw-row" and keeping the first piece that mentions fw-av-bot also catches
+    # the BAR (which carries both faces by design), so the assertion failed on an
+    # icon the avatar never used.
+    # Match the row markup, not the bare class name: the stylesheet block also
+    # contains "fw-av-bot", so a substring test picked up the CSS and failed on
+    # an icon the avatar never used.
+    rows = [m.value for m in at.markdown if 'class="fw-av fw-av-bot"' in m.value]
+    assert rows, "no bot row in the transcript"
+    for row in rows:
+        assert idle in row, "a bot row is not using the idle face"
+        assert think not in row, "a bot row is using the thinking face"
+    print("3. the avatar is always the tongue-out face          OK")
 
 
-def test_icon_file_is_valid_xml() -> None:
-    """A malformed SVG renders as NOTHING, with no error anywhere.
+def test_icons_are_raster_and_two_tone() -> None:
+    """Both faces must exist, differ, and carry a white face under dark ink.
 
-    This is not hypothetical: the first version of this file had a double hyphen
-    inside an XML comment, which is illegal, and the result was a blank space
-    where the dog should be. ElementTree is the cheapest possible guard.
+    A raster is the point: the drawings are 112-125 px crops of a photograph of a
+    drawing, and contour-tracing them produced blobs (the eyes fused with the
+    muzzle). The two-tone requirement is the one that is easy to lose silently --
+    dark ink alone is invisible on the dark theme, and a white face alone is
+    invisible on the light one, so both must be in the same file.
     """
-    import xml.etree.ElementTree as ET
+    from PIL import Image
 
-    svg = Path(__file__).parent / "assets" / "husky.svg"
-    ET.fromstring(svg.read_text(encoding="utf-8"))
-    text = svg.read_text(encoding="utf-8")
-    # Front view: the face is symmetric about x=32, so the two ears and the two
-    # goggles must be mirrored pairs.
-    assert text.count("<ellipse") >= 4, "expected two goggle patches and two eyes"
-    print("4. assets/husky.svg parses, with mirrored features  OK")
+    idle_path = ASSETS / "husky-idle.png"
+    think_path = ASSETS / "husky-think.png"
+    for path in (idle_path, think_path):
+        assert path.exists(), f"missing icon {path.name}"
+
+    idle = np.asarray(Image.open(idle_path).convert("RGBA")).astype(float)
+    think = np.asarray(Image.open(think_path).convert("RGBA")).astype(float)
+    assert idle.shape != think.shape or not np.array_equal(idle, think), (
+        "the two faces are the same image"
+    )
+
+    for name, img in (("idle", idle), ("think", think)):
+        alpha = img[..., 3] / 255.0
+        lum = img[..., :3].mean(axis=2)
+        opaque = alpha > 0.5
+        # Roughly half the square is drawing and the rest is the transparent
+        # margin (measured 0.49 for the idle face, 0.54 for the thinking one).
+        assert 0.30 < opaque.mean() < 0.95, (
+            f"{name}: {opaque.mean():.2f} of the icon is drawn"
+        )
+        face = opaque & (lum > 170)
+        ink = opaque & (lum < 120)
+        assert face.mean() > 0.10, f"{name}: no white face ({face.mean():.2f})"
+        assert ink.mean() > 0.10, f"{name}: no dark ink ({ink.mean():.2f})"
+        # Transparent margin on all four sides, or the icon is a crop that will
+        # read as off-centre in a circle.
+        assert not opaque[0].any() and not opaque[-1].any(), f"{name}: no top/bottom margin"
+    print("4. both faces are raster, differ, white under ink    OK")
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +350,30 @@ GEOMETRY = {
       .map(e => e.innerText.slice(0, 200)))()""",
     "layoutFlag": "!!window.__fwLayout",
     "rows": "document.querySelectorAll('.fw-row').length",
+    # The scrollbar must sit on the window's right edge. A scroll box that
+    # inherits Streamlit's centred 820 px column puts its thumb 200 px inboard,
+    # which is not where a window's own scrollbar is.
+    "scrollbar": """(() => {
+      const e = document.querySelector('.st-key-transcript');
+      if (!e) return null;
+      const r = e.getBoundingClientRect();
+      return {left: Math.round(r.left), right: Math.round(r.right),
+              win: window.innerWidth,
+              gutter: e.offsetWidth - e.clientWidth,
+              overflow: getComputedStyle(e).overflowY};
+    })()""",
+    "faces": """(() => {
+      const head = document.querySelector('.fw-head');
+      if (!head) return null;
+      const vis = (sel) => {
+        const e = head.querySelector(sel);
+        if (!e) return null;
+        const cs = getComputedStyle(e);
+        return {opacity: parseFloat(cs.opacity), src: (e.getAttribute('src')||'').slice(0, 30)};
+      };
+      return {busy: head.getAttribute('data-busy'),
+              idle: vis('.fw-face-idle'), think: vis('.fw-face-think')};
+    })()""",
 }
 
 
@@ -367,6 +430,58 @@ def test_live_layout() -> None:
         )
         print("6. live: opens at the newest message, above the composer OK")
 
+        # The scrollbar must be the window's scrollbar, in the window's place.
+        # The transcript is full-bleed for exactly this reason: inside Streamlit's
+        # centred 820 px column the thumb sat ~200 px inboard of the right edge.
+        sb = got["scrollbar"]
+        assert sb, "no .st-key-transcript in the page"
+        assert sb["overflow"] == "auto", f"the transcript is {sb['overflow']}"
+        assert abs(sb["right"] - sb["win"]) <= 1, (
+            f"the scroller ends at x={sb['right']} in a {sb['win']} px window, so its "
+            f"scrollbar is {sb['win'] - sb['right']} px inboard of the window edge"
+        )
+        assert sb["left"] <= 1, f"the scroller starts at x={sb['left']}, not the edge"
+        assert sb["gutter"] > 0, (
+            "the scroller reserves no scrollbar gutter, so this proves nothing"
+        )
+        print(f"7. live: scrollbar on the window edge (x={sb['right'] - sb['gutter']}"
+              f"-{sb['right']} of {sb['win']})  OK")
+
+        # The bar's face must follow the turn. Both images are in the DOM and CSS
+        # chooses; checking opacity is what proves the swap actually happened,
+        # rather than that both files happen to be present.
+        idle_face = got["faces"]
+        assert idle_face, "no .fw-head in the page"
+        assert idle_face["busy"] == "0", (
+            f"the page loaded already thinking (data-busy={idle_face['busy']})"
+        )
+        assert idle_face["idle"]["opacity"] > 0.9, (
+            f"the idle face is not visible at rest: {idle_face['idle']}"
+        )
+        assert idle_face["think"]["opacity"] < 0.1, (
+            f"the thinking face is visible at rest: {idle_face['think']}"
+        )
+
+        def _start_turn() -> None:
+            with LOG.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"kind": "user_text", "text": "a question",
+                                    "ts": time.time()}) + "\n")
+                f.write(json.dumps({"kind": "bot_started",
+                                    "ts": time.time()}) + "\n")
+
+        busy_face = asyncio.run(_drive(srv.url, {"faces": GEOMETRY["faces"]},
+                                       mid=_start_turn, settle=5.0))
+        assert busy_face["faces"]["busy"] == "1", (
+            f"the bar did not notice the turn: {busy_face['faces']}"
+        )
+        assert busy_face["faces"]["think"]["opacity"] > 0.9, (
+            f"the thinking face did not appear: {busy_face['faces']}"
+        )
+        assert busy_face["faces"]["idle"]["opacity"] < 0.1, (
+            f"the idle face is still visible during a turn: {busy_face['faces']}"
+        )
+        print("8. live: the bar's face follows the turn              OK")
+
         # And it must not follow while the reader is reading back.
         #
         # The new turn is appended from INSIDE the browser session (the `mid`
@@ -407,15 +522,15 @@ def test_live_layout() -> None:
             "the view jumped to "
             f"{followed['after']['scrollTop']} while the reader was scrolled up"
         )
-        print("7. live: new turn does not yank a reader back down    OK")
+        print("9. live: new turn does not yank a reader back down    OK")
 
 
 def main() -> int:
     tests = [
         test_bar_holds_identity_and_both_controls,
         test_transcript_is_its_own_scroll_box,
-        test_avatar_is_svg_not_png,
-        test_icon_file_is_valid_xml,
+        test_avatar_is_the_idle_face,
+        test_icons_are_raster_and_two_tone,
     ]
     failed = 0
     for t in tests:

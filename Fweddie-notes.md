@@ -691,7 +691,7 @@ how the test was validated.
   raises a `clear_box` flag and the next run clears it before the widget is
   built.
 * `st.chat_message` rejects SVG avatars (`image_to_url` uses `channels="RGB"`),
-  so the husky head ships as PNG, drawn with PIL. `cairosvg` is not installed.
+  so the transcript uses plain markdown rows with an `<img>` of our own.
 * Keyed widgets get a `.st-key-<key>` class, which is how the mic and the Send
   button are styled without depending on widget order. There is no supported
   way to add a class to a Streamlit container, so the blue "listening" state is
@@ -858,24 +858,93 @@ unconditional `follow()` never runs. The check that guards this therefore append
 a turn from inside the browser session. The first version of that check appended
 before the browser started and passed against a deliberately broken script.
 
-## The husky icon is drawn here
+## The husky icons are cut from a reference sheet
 
-The reference was a stock husky-head vector; this is an original front view, so
-there is no licence to track. Two things make it work on both palettes:
+Two faces, both cropped from one hand-drawn sheet
+(`assets/reference/husky-sheet.jpg`, kept so the icons can be re-cut):
 
-* the silhouette is WHITE with a dark outline. On the dark theme the white face
-  carries the shape; on the light theme the dark outline does (`#ffffff` on
-  `#faf9f5` is 1.06:1, i.e. invisible on its own);
-* every husky marking is DARK and sits INSIDE the white face -- the goggles, the
-  ear insets, the nose -- so it always has white behind it.
+* row 2, column 1 -- mouth open, tongue out. The bar at rest, and the avatar
+  beside every reply.
+* row 3, column 4 -- muzzle up. The bar while a turn is in flight.
 
-The avatar now uses the SVG (inline data URI) rather than the PNG, which stays
-only as the favicon. `tools/make_icons.py` regenerates the PNGs from the SVG.
+`tools/make_husky.py` regenerates them.
 
-One silent failure, worth the guard it now has: the first version put a double
-hyphen inside an XML comment, which is illegal. The file did not parse and the
-browser rendered NOTHING -- no error, no placeholder, just a gap. The test parses
-the file with ElementTree for exactly that reason.
+### Why rasters, and not the traced SVG that was here before
+
+The previous icon was an SVG I drew by hand, and tracing it was fine because the
+shapes were mine. These are 112-125 px crops of a *photograph* of a drawing, and
+tracing them at that resolution produced blobs: the outline broke into fragments,
+the eyes fused with the muzzle, and the result read as a smudge. So the icons are
+PNGs at 4-6x the size they are drawn at, cut with an alpha matte rather than a
+contour:
+
+* ink alpha is a linear ramp of the inverse grey level,
+  `(232 - v) / (232 - 70)`, gamma 0.85 to keep thin lines from greying out at
+  30 px;
+* the same matte, thresholded at 0.42, is flood-filled from the border to find the
+  SILHOUETTE, which is painted white underneath. Without it the icon is dark ink
+  on a dark page (invisible) or a bare outline on a light one;
+* the result is trimmed to the drawing and padded back to a square, so both faces
+  are the same size in the bar and neither has a cropped chin.
+
+### Three bugs this went through, each now pinned
+
+1. **The closing kernel sealed the background.** The silhouette needs a
+   morphological close, because both outlines have pinholes and the fill leaks
+   through them. But closing also grows the ink, and on a crop with only 3 px of
+   air the grown outline reached the border and trapped the surrounding
+   background in pockets the corner fill could never enter. Only 1070 of ~8000
+   background pixels were reached; the rest were counted as "inside", so the white
+   face covered the whole rectangle and the icon was a white square. Fix: pad by
+   the kernel width BEFORE closing.
+2. **The kernels differ per icon.** The idle head's outline closes at 9 px; the
+   thinking head's jaw leaves a gap at the throat that needs 13. Below those
+   values the fill escapes and the face never appears -- measured as the point
+   where the filled fraction stops growing (idle 0.858 -> 0.923 at k=9, flat
+   after; think 0.651 -> 0.767 -> 0.853 at k=9 and k=11, flat after 13).
+3. **The two faces came out byte-identical.** The PNG renderer screenshotted one
+   page holding both icons at the window size of the FIRST one. Caught by
+   comparing the two files.
+
+The PNGs are inlined as data URIs: there is no static route to `assets/`, and a
+data URI cannot 404 or go stale while an icon is being re-cut. `assets/husky-32.png`
+remains the favicon, which Streamlit requires to be raster.
+
+## The bar's face follows the turn
+
+The identity block is its own `@st.fragment(run_every=1.0)`, so the face can change
+without re-running the theme switch, Clear, or the status line on a timer. Both
+images are always in the DOM (`.fw-face-idle`, `.fw-face-think`) and CSS picks one
+through `.fw-head.fw-busy`; swapping the `src` instead left a frame with no image
+while the new data URI decoded, which at 30 px is a visible blink.
+
+The avatar beside a reply is always the idle (tongue-out) face. That is a
+different question from the bar's: the avatar is *who is speaking*, the bar is
+*what it is doing*. A test pins both -- bot rows must carry the idle face and must
+not carry the thinking one, which is easy to break because the bar legitimately
+holds both.
+
+## The scrollbar sits on the window edge
+
+The transcript is full-bleed (`width: 100vw` plus a negative `50% - 50vw` margin)
+and the reading column is constrained inside it. Before this the scroller
+inherited Streamlit's centred 820 px column, so its thumb sat ~200 px inboard of
+the window edge -- measured, scroller x=206..994 in a 1200 px window. That is not
+where a window's scrollbar lives, and it is what "the scrollbar is in the wrong
+place" was about.
+
+Two details that cost time:
+
+* `max-width: 100vw` is required, not decoration. Streamlit's own
+  `.stVerticalBlock` carries `max-width: 100%`, which clamped 100vw straight back
+  to the column (width 788 px, starting at x=0).
+* the reading column is the scroller's child `[data-testid="stLayoutWrapper"]`,
+  not the `stVerticalBlock` -- the latter is one level further in, and a selector
+  for it matched nothing.
+
+Measured after: scroller x=0..1200 in a 1200 px window, gutter 10 px, and the thumb
+on hover at x=1190-1198. Streamlit paints the thumb `transparent` until `*:hover`,
+which is why a still screenshot shows no bar at all.
 
 ## The bar
 
@@ -891,16 +960,29 @@ coordinates flipped the palette `dark -> light` (`rgb(38,38,36)` ->
 
 ## Tests
 
-`test_dashboard_layout.py`, 7 checks: 4 through AppTest, 3 against a live server
+`test_dashboard_layout.py`, 9 checks: 4 through AppTest, 5 against a live server
 the test starts itself (on its own port, reading its own log -- driving whatever
 server happens to be running meant appending to a log the server did not read,
-which is how one check passed by testing nothing).
+which is how one check once passed by testing nothing).
 
 Every check was confirmed able to fail, by sabotaging the code it protects:
 
-    unconditional follow   -> "the view jumped to 2926 while the reader was scrolled up"
-    bar in the page flow   -> "the bar is static, not fixed"
-    no measured height     -> "the transcript ends at 3186, below the composer at 575"
+    avatar on the thinking face  -> "a bot row is not using the idle face"
+    icon never thinks            -> "the thinking face did not appear"
+    scroller back in the column  -> "the scroller ends at x=788 in a 1100 px
+                                     window, so its scrollbar is 312 px inboard"
+    unconditional follow         -> "the view jumped to 2926 while the reader was
+                                     scrolled up"
+    bar in the page flow         -> "the bar is static, not fixed"
+    no measured height           -> "the transcript ends at 3186, below the
+                                     composer at 575"
+
+Two of the new checks had to be fixed before they were worth anything. The avatar
+check sliced the page blob on `"fw-row"` and kept the first piece mentioning
+`fw-av-bot`, which also matches the stylesheet and the bar; it now matches the row
+markup exactly. The icon check asserted "more than half the icon is drawn", which
+was wrong once the icons were trimmed and padded to a square -- half is exactly
+right.
 
 `test_pipeline_asr.py` still fails its 2.5 s budget (5.83 s here). Pre-existing and
 unrelated: stashing this change and re-running gives 6.06 s.
