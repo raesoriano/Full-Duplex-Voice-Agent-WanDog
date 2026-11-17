@@ -239,12 +239,21 @@ marks the runner `settled` *before* cancelling and the aggregator records
 `"CANCELLED"` — so a handler that reports its own result on the way out is
 rejected with "Ignoring result … already settled". The handler only logs.
 
-**Still open:** self-echo during ordinary answers. A `bot_started` followed by a
-`user_started` inside the bot's own utterance happened 26% of the time after real
-answers (vs 15% after announcements), so the echo is there too — it just costs a
-false barge-in rather than a cancelled tool. The v4 defence would need restoring
-as a mic duck while the bot speaks, or `pywebrtc_audio.EchoCanceller`, which is
-installed but unused.
+**Self-echo during ordinary answers: closed in hardware, not in code.** A
+`bot_started` followed by a `user_started` inside the bot's own utterance
+happened 26% of the time after real answers (vs 15% after announcements), so the
+echo was there too — it just cost a false barge-in rather than a cancelled tool.
+The v4 defence would have been restoring the mic duck while the bot speaks, or
+`pywebrtc_audio.EchoCanceller` (installed but unused).
+
+It was not needed. Moving the speaker away from the mic and lowering both the
+output volume and the mic gain removed the acoustic coupling at the source, and
+the agent now runs without false barge-ins. No AEC code, no mic duck, no extra
+latency. This is the intended state: **do not add `pywebrtc_audio.EchoCanceller`
+or a mic duck for this** — the coupling is gone at the physical layer, and either
+change would spend CPU and complicate barge-in for a problem that no longer
+exists. If the echo ever returns, fix the placement and gain first; treat code
+AEC as the fallback, not the default.
 
 The two env vars `mcp_bridge` sets when spawning the servers are what make the
 safeguards actually fire (without them every ask collapses to a hard deny):
