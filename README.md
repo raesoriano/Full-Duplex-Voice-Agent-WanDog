@@ -76,6 +76,24 @@ $EDITOR secrets.yaml          # quote every value
 | `github_token` | `GITHUB_TOKEN` | `github_repo`, `git push` |
 | `huggingface_token` | `HF_TOKEN` | HuggingFace model downloads |
 
+### News freshness
+
+`search` with `type="news"` is the path for anything current. Fweddie tunes it
+on its own side, because OnIt's news branch takes no time filter and orders by
+relevance rather than date:
+
+| Env var | Default | What it does |
+|---|---|---|
+| `FWEDDIE_MCP_NEWS_OVERFETCH` | `10` | results to request before trimming |
+| `FWEDDIE_MCP_NEWS_SORT` | `1` | sort newest-first and add an `age` field |
+| `FWEDDIE_MCP_NEWS_REFRESH_RETRIES` | `2` | extra calls when the newest hit is stale |
+| `FWEDDIE_MCP_NEWS_REFRESH_BUDGET` | `4.0` | seconds the refresh may spend |
+| `FWEDDIE_MCP_NEWS_FRESH_DAYS` | `0` | newest age that counts as fresh |
+
+Results now reach the model newest-first and carry `age` ("today", "3 days
+ago") beside `date`, so the agent says "as of today" only when that is true.
+Set `FWEDDIE_MCP_NEWS_SORT=0` to restore the server's own ordering.
+
 `ollama_api_key` is deliberately kept out of the spawned servers' environment.
 OnIt's search chain is Tavily → DuckDuckGo and has no Ollama tier, while
 Ollama's web search is metered per call — a forwarded key would be a cost

@@ -284,6 +284,39 @@ MCP_SEARCH_RETRY_DELAY = float(os.environ.get("FWEDDIE_MCP_SEARCH_RETRY_DELAY", 
 # This is the deterministic backstop. Set to 0 to let the model decide alone.
 MCP_NEWS_AUTODETECT = os.environ.get("FWEDDIE_MCP_NEWS_AUTODETECT", "1") == "1"
 
+# How many news results to ASK OnIt for, regardless of how many the model
+# wants. ddgs returns news in relevance order, not date order, so the newest
+# item is often not in the first five: measured on "Alaska US Senate election
+# results" on 17 Nov 2026, the five-result page was 17, 12, 17, 14, 11 Nov --
+# and the model cap only has room for the first two, so the agent reported
+# "November 12" while 17 Nov stories sat further down the same payload. The
+# fix is to over-fetch, sort by date, then trim back to what was asked for.
+# 10 is ddgs' practical ceiling for one news page.
+MCP_NEWS_OVERFETCH = int(os.environ.get("FWEDDIE_MCP_NEWS_OVERFETCH", 10))
+
+# Sort a news payload newest-first before the model sees it, and label each
+# result with its age ("today", "3 days ago"). Off = keep ddgs' own order.
+MCP_NEWS_SORT = os.environ.get("FWEDDIE_MCP_NEWS_SORT", "1") == "1"
+
+# ddgs returns a DIFFERENT page for the same query on consecutive calls: six
+# calls on "Alaska US Senate election results" split into two distinct sets,
+# one with a same-day story and one without. So a stale page often means "this
+# draw missed it", not "no news exists". When the newest result is older than
+# MCP_NEWS_FRESH_DAYS, the search is re-run up to MCP_NEWS_REFRESH_RETRIES more
+# times and the NEWEST payload wins. Measured over 6 rounds: newest item was
+# from today on 3/6 first calls and 5/6 with two extra calls; mean latency
+# 0.8s -> 2.2s, hidden behind the spoken announcement.
+MCP_NEWS_REFRESH_RETRIES = int(os.environ.get("FWEDDIE_MCP_NEWS_REFRESH_RETRIES", 2))
+MCP_NEWS_REFRESH_DELAY = float(os.environ.get("FWEDDIE_MCP_NEWS_REFRESH_DELAY", 0.6))
+# A page whose newest item is this many days old or newer counts as fresh
+# enough to stop re-asking. 0 = only a same-day story stops the retry.
+MCP_NEWS_FRESH_DAYS = int(os.environ.get("FWEDDIE_MCP_NEWS_FRESH_DAYS", 0))
+# Hard ceiling on the whole news refresh, in seconds. ddgs occasionally takes
+# 5-10s for a single call, and this is a voice turn: a retry that pushes the
+# answer past this budget is worse than a page that is a day old. Measured
+# worst case without it: 10.6s to first speech.
+MCP_NEWS_REFRESH_BUDGET = float(os.environ.get("FWEDDIE_MCP_NEWS_REFRESH_BUDGET", 4.0))
+
 # ---------------------------------------------------------------------------
 # Dashboard (Streamlit, reachable from other devices on the LAN)
 # ---------------------------------------------------------------------------

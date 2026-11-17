@@ -165,6 +165,38 @@ matches the query*, not blindly from the front. Measured on 12 real queries:
 0 empty payloads, and the answer text present in what the model sees 12/12
 (previously 4 of 5 web searches came back empty).
 
+**News freshness** (`mcp_bridge._sort_news`, `_refresh_stale_news`). On 17 Nov
+2026 the agent answered "the latest news is November 12" for the Alaska Senate
+race while Google showed stories from that morning. Nothing was broken in the
+transport: the model was handed a correct, dated, well-formed payload whose
+first two entries were days old. The cause is that `ddgs.news` orders by
+**relevance, not recency**, and the model cap keeps a *prefix* — so the
+prefix decided the answer. The same five-result page measured 17, 12, 17, 14,
+11 Nov, with the two same-day stories sitting third and fifth.
+
+Three fixes, all on Fweddie's side (OnIt's `search` has no `timelimit` and we
+do not edit it):
+
+1. **Over-fetch, then trim.** `_shape_search_args` asks for
+   `MCP_NEWS_OVERFETCH` (10, ddgs' practical ceiling) and records the caller's
+   real number under a private `_news_wanted` key, which `call_tool` strips
+   before the arguments reach the server.
+2. **Sort newest-first, before the cap.** `_sort_news` orders by date and adds
+   an `age` field ("today", "yesterday", "3 days ago") next to `date`. The cap
+   can only keep a prefix, so the prefix has to be the newest.
+3. **Re-ask when stale.** ddgs returns a *different* page for the same query on
+   consecutive calls, so a stale page often means "this draw missed it".
+   `_refresh_stale_news` re-runs the search up to `MCP_NEWS_REFRESH_RETRIES`
+   (2) times when the newest item is not from today, keeps the newest payload
+   (never the last), and gives up at `MCP_NEWS_REFRESH_BUDGET` (4s) — bounded
+   with `wait_for`, because a single ddgs call was measured at 10.5s.
+
+Measured on 10 collected payloads, so ddgs' variance is held constant: mean
+newest-result age 1.40 → 0.80 days, median 2 → 1 days, 5 rows fresher,
+**0 rows worse**. With the refresh enabled, "the model sees a same-day story"
+went from 3/6 to 5/6 over 6 rounds, at a mean 0.8s → 2.2s, hidden behind the
+spoken announcement. `test_news_v2.py` covers all of it offline (11 groups).
+
 The two env vars `mcp_bridge` sets when spawning the servers are what make the
 safeguards actually fire (without them every ask collapses to a hard deny):
 

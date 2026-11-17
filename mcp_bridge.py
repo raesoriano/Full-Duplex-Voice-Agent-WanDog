@@ -20,6 +20,7 @@ venv.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import os
 import re
@@ -147,7 +148,12 @@ class OnItMCPServer:
         (the server's policy message), not as exceptions, so the LLM can hear
         about them and explain them to the user."""
         session = await self._ensure_session()
-        result = await session.call_tool(name, arguments)
+        # Private bookkeeping keys (leading underscore) are ours, not the
+        # server's: its signature does not declare them and the MCP SDK
+        # validates arguments against the tool schema. Drop them at the wire.
+        payload = {k: v for k, v in (arguments or {}).items()
+                   if not str(k).startswith("_")}
+        result = await session.call_tool(name, payload)
         return _result_to_text(result)
 
     async def close(self) -> None:
@@ -331,13 +337,23 @@ def _shape_search_args(args: dict) -> dict:
         return args
     shaped = dict(args)
     shaped["type"] = "news"
-    # Five is the news branch's useful ceiling for a spoken answer; a bigger
-    # number only pushes more of the payload past the model's cap.
+    # Ask for MORE than the caller wanted. ddgs orders news by relevance, not
+    # by date, so the newest story is routinely not in the first five and the
+    # model cap -- which keeps only the first two results -- never sees it.
+    # Measured on "Alaska US Senate election results", 17 Nov 2026: the
+    # five-result page was 17, 12, 17, 14, 11 Nov, so the agent answered
+    # "November 12" while two 17 Nov stories were in the same payload. The
+    # over-fetch is trimmed back to `wanted` after the date sort.
+    wanted = 5
     try:
-        if int(shaped.get("max_results") or 0) < 3:
-            shaped["max_results"] = 5
+        if int(shaped.get("max_results") or 0) >= 3:
+            wanted = int(shaped["max_results"])
     except (TypeError, ValueError):
-        shaped["max_results"] = 5
+        pass
+    shaped["max_results"] = max(wanted, config.MCP_NEWS_OVERFETCH)
+    # Remember what the caller actually asked for; _trim_news uses it. Kept
+    # under a private key so it never reaches the server's signature.
+    shaped["_news_wanted"] = wanted
     return shaped
 
 
@@ -353,6 +369,145 @@ def _search_failed(text: str) -> bool:
     except (ValueError, TypeError):
         return False
     return isinstance(data, dict) and bool(data.get("error"))
+
+
+def _parse_news_date(value: Any) -> Optional[datetime.datetime]:
+    """Parse a news ``date`` into a datetime, or None.
+
+    OnIt formats news dates with ``strftime('%B %d, %Y')`` ("November 17,
+    2026") after parsing ddgs' ISO stamp, so both shapes reach us. Anything
+    unparseable returns None and sorts last but is never dropped -- a result
+    with an unreadable date is still a result.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        return datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+    for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d", "%d %B %Y", "%d %b %Y"):
+        try:
+            return datetime.datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _news_age_label(when: Optional[datetime.datetime],
+                    now: Optional[datetime.datetime] = None) -> str:
+    """Human age of a news item: ``today``, ``yesterday``, ``3 days ago``."""
+    if when is None:
+        return ""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    if when.tzinfo is not None:
+        when = when.astimezone()
+    else:
+        when = when.replace(tzinfo=None)
+        now = now.astimezone().replace(tzinfo=None)
+    days = (now.date() - when.date()).days
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "yesterday"
+    return f"{days} days ago"
+
+
+def _news_newest_age_days(text: str) -> Optional:
+    """Age in days of the newest result in a news payload, or None.
+
+    Used to decide whether a news page is worth re-asking for. None means the
+    payload carries no readable date at all, which is treated as "cannot
+    judge" -- the caller then does not retry, because there is nothing to
+    compare against and a retry would be a coin flip.
+    """
+    stripped = text.strip() if isinstance(text, str) else ""
+    if not stripped.startswith("["):
+        return None
+    try:
+        items = json.loads(stripped)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(items, list):
+        return None
+    now = datetime.datetime.now(datetime.timezone.utc)
+    ages = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        when = _parse_news_date(item.get("date"))
+        if when is None:
+            continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=datetime.timezone.utc)
+        ages.append((now.astimezone().date() - when.astimezone().date()).days)
+    return min(ages) if ages else None
+
+def _sort_news(text: str, wanted: Optional[int] = None) -> str:
+    """Order a news payload newest-first and label each result with its age.
+
+    Why this exists: ddgs returns news by relevance, not recency. On 17 Nov
+    2026 the five results for "Alaska US Senate election results" came back
+    dated 17, 12, 17, 14 and 11 November. The model cap keeps only the first
+    two, so the agent said "as of November 12" -- while two stories from that
+    same day sat further down the very same payload. The user had Google open
+    showing hours-old coverage, which is what made the news search look broken.
+
+    Sorting here, before the cap, is the fix: the cap can only keep a prefix,
+    so the prefix has to be the newest. ``wanted`` trims the over-fetched list
+    back to the number of results the caller actually asked for.
+
+    ``age`` is added as its own field rather than folded into the snippet: the
+    model reads ``date`` for the citation and ``age`` for the judgement, and a
+    voice answer wants both ("today" is what makes it say "just now" rather
+    than reading an old date aloud).
+
+    Returns the payload untouched when it is not a JSON list of dicts.
+    """
+    if not config.MCP_NEWS_SORT:
+        return text
+    stripped = text.strip()
+    if not stripped.startswith("["):
+        return text
+    try:
+        items = json.loads(stripped)
+    except (ValueError, TypeError):
+        return text
+    if not isinstance(items, list) or not items:
+        return text
+    if not all(isinstance(item, dict) for item in items):
+        return text
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    epoch = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+
+    def key(item: dict) -> datetime.datetime:
+        parsed = _parse_news_date(item.get("date"))
+        if parsed is None:
+            return epoch
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+        return parsed
+
+    # A list where NOTHING carries a readable date is not a news payload --
+    # it is a general web result that happens to be a list. Sorting it would
+    # reorder by nothing and re-encode the JSON for no benefit, so leave it
+    # byte-for-byte alone.
+    if all(key(item) == epoch for item in items):
+        return text
+
+    ordered = sorted(items, key=key, reverse=True)
+    if wanted is not None and wanted > 0:
+        ordered = ordered[:wanted]
+
+    labelled = []
+    for item in ordered:
+        enriched = dict(item)
+        label = _news_age_label(_parse_news_date(item.get("date")), now)
+        if label:
+            enriched["age"] = label
+        labelled.append(enriched)
+    return json.dumps(labelled, ensure_ascii=False)
 
 
 def _cap_for_model(text: str, limit: int, query: Optional[str] = None) -> str:
@@ -872,8 +1027,15 @@ class ToolBridgeProcessor(FrameProcessor):
             # fixed phrase on purpose: it must not depend on the model.
             await self._say(_announcement(name))
             call_args = dict(kwargs)
+            # How many results the caller asked for. _shape_search_args
+            # over-fetches so the date sort has something to choose from, and
+            # records the real number under a private key. It is popped here
+            # because call_args is forwarded verbatim to the MCP server, which
+            # would reject an argument its signature does not declare.
+            news_wanted = None
             if name == "search":
                 call_args = _shape_search_args(call_args)
+                news_wanted = call_args.pop("_news_wanted", None)
             try:
                 # One deadline for the whole call, retries included. Wrapping
                 # only the individual attempt would let a 3-attempt search hold
@@ -892,6 +1054,14 @@ class ToolBridgeProcessor(FrameProcessor):
                 text = f"[tool error] {name}: {e}"
 
             full = text if isinstance(text, str) else str(text)
+            # News only: order newest-first and label the age, BEFORE the cap.
+            # The cap keeps a prefix, so the prefix has to be the newest item;
+            # ddgs' relevance order puts old stories first (measured: 17, 12,
+            # 17, 14, 11 Nov for the Alaska race on 17 Nov), which is why the
+            # agent kept reporting a days-old date. Also trims the over-fetch
+            # in _shape_search_args back to what the caller asked for.
+            if name == "search" and call_args.get("type") == "news":
+                full = _sort_news(full, news_wanted)
             # Layer 3: the model sees a bounded, parseable head of the result;
             # the full text stays in the session folder and on the dashboard.
             # This is what keeps a huge MCP payload from being the thing that
@@ -920,6 +1090,61 @@ class ToolBridgeProcessor(FrameProcessor):
         _handler.__onit_server__ = server.name  # type: ignore[attr-defined]
         return _handler
 
+    async def _refresh_stale_news(self, text: str, name: str, call_args: dict,
+                                  server) -> str:
+        """Re-run a news search when the newest result is not from today.
+
+        ddgs returns a *different* set of stories for the same query on
+        consecutive calls -- measured on "Alaska US Senate election results"
+        on 17 Nov 2026, six calls split into two distinct pages, one of which
+        contained no 17 Nov story at all. So a stale page is often not "no news
+        exists" but "this draw missed it", and asking again usually finds it:
+        measured over 6 rounds, the newest item was from today on 3 of 6 first
+        calls, and on 5 of 6 when two more calls were allowed. Cost: mean
+        latency 0.8s -> 2.2s, hidden behind the spoken announcement.
+
+        The best (newest) payload is kept, never the last one, so a retry can
+        only improve the answer. Bounded by MCP_NEWS_REFRESH_RETRIES and
+        skipped entirely when the newest result is already fresh, so a topic
+        with genuinely no news today pays one extra call, not a loop.
+        """
+        attempts = max(0, config.MCP_NEWS_REFRESH_RETRIES)
+        if not attempts or _search_failed(text):
+            return text
+        best = text
+        best_age = _news_newest_age_days(best)
+        # The first call already happened; the budget covers the retries only.
+        deadline = time.monotonic() + config.MCP_NEWS_REFRESH_BUDGET
+        for _ in range(attempts):
+            if best_age is not None and best_age <= config.MCP_NEWS_FRESH_DAYS:
+                break
+            await asyncio.sleep(config.MCP_NEWS_REFRESH_DELAY)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            # Bound the retry itself, not just the loop: a single ddgs call
+            # was measured taking 10.5s, which would blow the budget the loop
+            # check was meant to enforce. On timeout the payload we already
+            # have wins, so the worst case is the first page's freshness.
+            try:
+                candidate = await asyncio.wait_for(
+                    self.guard.handle(name, call_args, server, server.call_tool),
+                    timeout=remaining,
+                )
+            except asyncio.TimeoutError:
+                logger.info("News refresh hit its {:.1f}s budget; keeping the "
+                            "first page", config.MCP_NEWS_REFRESH_BUDGET)
+                break
+            if _search_failed(candidate):
+                continue
+            age = _news_newest_age_days(candidate)
+            if age is not None and (best_age is None or age < best_age):
+                best, best_age = candidate, age
+        if best is not text:
+            logger.info("News refreshed: newest result now {} day(s) old",
+                        best_age)
+        return best
+
     async def _call_with_search_retry(self, name: str, call_args: dict,
                                       server) -> str:
         """Run a tool, retrying a failed ``search`` a bounded number of times.
@@ -947,6 +1172,12 @@ class ToolBridgeProcessor(FrameProcessor):
             await asyncio.sleep(config.MCP_SEARCH_RETRY_DELAY * attempt)
             text = await self.guard.handle(name, call_args, server,
                                            server.call_tool)
+
+        # A page that came back successfully can still be days stale, because
+        # ddgs orders by relevance and varies its draw. Only news is re-asked;
+        # a general web result has no date to judge.
+        if call_args.get("type") == "news":
+            text = await self._refresh_stale_news(text, name, call_args, server)
         return text
 
     async def close(self) -> None:
