@@ -215,7 +215,7 @@ else:
                     st.caption(f"called · {ts}")
 
             elif kind == "tool_result":
-                with st.chat_message("assistant", avatar="↳"):
+                with st.chat_message("assistant", avatar="↩️"):
                     st.markdown(f"**{ev.get('tool', 'tool')}** — result")
                     result = str(ev.get("result", ""))
                     # Scrollable so a long payload does not push the
