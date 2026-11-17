@@ -146,7 +146,7 @@ def test_cap_is_hard() -> bool:
     # The plain-text path adds a trailer after the slice, so it is the one
     # shape that can read slightly over. Bound that explicitly rather than
     # pretending it fits.
-    text = "x" * 9000
+    text = "x" * (CAP + 9000)
     out = mcp_bridge._cap_for_model(text, CAP)
     ok &= check(f"plain text: {len(text)} -> {len(out)} chars (trailer allowed)",
                 len(out) <= CAP + 80, f"over by {len(out) - CAP}")
@@ -204,7 +204,18 @@ def test_dict_keeps_identity_and_counts() -> bool:
                 and d["documents"]))
     ok &= check("results survive", bool(isinstance(d.get("results"), list)
                 and d["results"]))
-    ok &= check("a note explains any trimming", bool(d.get("note")))
+
+    # The default budget (24000) is larger than this 1718-char payload, so
+    # nothing is trimmed and no note is owed. Pin that: a payload that fits
+    # must be passed through untouched, note and all.
+    ok &= check("a payload under the default budget is untouched",
+                mcp_bridge._cap_for_model(raw, CAP) == raw)
+    # Force the trimming path with an explicit small limit, which is where the
+    # note is owed. The limit is passed rather than taken from config so this
+    # keeps testing the trimming code after the default was raised.
+    d = json.loads(mcp_bridge._cap_for_model(raw, 900, query="result cap"))
+    ok &= check("a note explains any trimming (at a limit that trims)",
+                bool(d.get("note")), str(d.get("note"))[:60])
 
     raw = json.dumps([{"title": "T", "url": "https://e.com/1",
                        "date": "November 17, 2026", "content": "b" * 2000}])
@@ -259,37 +270,80 @@ def test_empty_result_was_reachable_before() -> bool:
 # --- 4. the cap costs sources, and that is measured -------------------------
 
 def test_cap_costs_sources() -> bool:
-    """Document the real cost: a 1200-char budget shows 2 of 5 web results.
+    """What the budget buys, at the default and at the old 1200.
 
-    This is not a defect to fix here -- a voice reply does not need five page
-    bodies -- but it is the number that decides whether the budget is right,
-    so it is pinned rather than left implicit.
+    The default is now 24000, and the point of raising it was that *no observed
+    payload* is truncated at that size -- a web page with full bodies and a
+    5-result news payload both arrive whole. The 1200 column is kept as the
+    measured reason for the change: it showed 2 of 5 sources, and on a real
+    news payload it showed 2 of 5 where 5 fit at 24000.
     """
     print("\n[7] what the budget buys (measured, not asserted as correct)")
     ok = True
-    out = mcp_bridge._cap_for_model(web_payload(), CAP, query="when is CES 2025")
-    shown = _shown(out)
-    ok &= check("a 5-result web page keeps at least 2 sources", shown >= 2,
-                f"showing={shown}")
-    ok &= check("and does not keep all 5 (that is the point of a cap)", shown < 5,
-                f"showing={shown}")
-    # A real news payload fits almost whole, which is the shape that matters.
+
+    # At the default, the shapes the tools really return are not cut at all.
+    for label, raw, q in [
+        ("5-result web page, full bodies", web_payload(), "when is CES 2025"),
+        ("local_search", local_search_payload(), "result cap"),
+        ("grep (60 matches)", grep_payload(), "match"),
+        ("search_document", search_document_payload(), "cap"),
+    ]:
+        out = mcp_bridge._cap_for_model(raw, CAP, query=q)
+        ok &= check(f"{label}: {len(raw)} chars fits whole at {CAP}",
+                    out == raw, f"got {len(out)} chars")
+
+    # A result bigger than the default is still cut, and must stay parseable
+    # and keep its path -- that is what the dict cap is for. read_file's own
+    # 12,094-char default payload now fits whole, so ask for a bigger file.
+    big = read_file_payload(30000)
+    out = mcp_bridge._cap_for_model(big, CAP)
+    d = json.loads(out)
+    ok &= check(f"read_file {len(big)} chars is cut to {len(out)} at {CAP}",
+                len(out) <= CAP and _valid(out), f"over by {len(out) - CAP}")
+    ok &= check("read_file keeps its path and size",
+                d.get("path") == "/a/b.py" and d.get("size_bytes") == 30000,
+                f"path={d.get('path')!r} size={d.get('size_bytes')!r}")
+
+    # The old budget, for the record.
+    out = mcp_bridge._cap_for_model(web_payload(), 1200, query="when is CES 2025")
+    ok &= check("at 1200 the same web page kept only 2 of 5 sources",
+                _shown(out) == 2, f"showing={_shown(out)}")
     news = open("/tmp/news_payload.json", encoding="utf-8").read() \
         if __import__("os").path.exists("/tmp/news_payload.json") else None
     if news:
         sorted_news = mcp_bridge._sort_news(news, 5)
+        small = mcp_bridge._cap_for_model(sorted_news, 1200, query="latest news")
+        ok &= check("a real 5-result news payload is cut at 1200 chars",
+                    _shown(small) < 5, f"showing={_shown(small)} of 5")
         out = mcp_bridge._cap_for_model(sorted_news, CAP, query="latest news")
-        ok &= check("a real 5-result news payload keeps 3 of 5 at 1200 chars",
-                    _shown(out) == 3, f"showing={_shown(out)}")
-        bigger = mcp_bridge._cap_for_model(sorted_news, 2400, query="latest news")
-        ok &= check("at 2400 chars the same payload fits whole",
-                    _shown(bigger) == 5, f"showing={_shown(bigger)}")
+        ok &= check(f"and fits whole at the {CAP} default",
+                    out == sorted_news, f"{len(out)} vs {len(sorted_news)} chars")
+    return ok
+
+
+def test_default_is_large_enough() -> bool:
+    """The default must clear every payload shape the tools have returned.
+
+    Measured on 17 Nov 2026, the largest payload any tool returned was a
+    22,970-char web search. A cap under that is a cap that decides the answer.
+    """
+    print("\n[8] the default clears every observed payload")
+    ok = check(f"MCP_MODEL_RESULT_CHARS = {CAP}", CAP >= 20000,
+               "must clear the largest observed payload (22,970 chars)")
+    # A payload just over the default is still cut, and still says so: the cap
+    # did not become decorative.
+    raw = json.dumps([{"title": "T", "url": "https://e.com/1",
+                       "date": "November 17, 2026",
+                       "content": "b" * (CAP + 4000)}])
+    out = mcp_bridge._cap_for_model(raw, CAP)
+    ok &= check(f"a {len(raw)}-char result is still cut to {len(out)}",
+                len(out) <= CAP and out != raw)
     return ok
 
 
 def test_zero_disables() -> bool:
     """limit <= 0 must still mean "no cap" -- the escape hatch stays open."""
-    print("\n[8] limit 0 disables the cap")
+    print("\n[9] limit 0 disables the cap")
     ok = True
     raw = grep_payload()
     ok &= check("0 returns the payload untouched",
@@ -308,6 +362,7 @@ def main() -> int:
         test_never_empty(),
         test_empty_result_was_reachable_before(),
         test_cap_costs_sources(),
+        test_default_is_large_enough(),
         test_zero_disables(),
     ]
     print("\n--- summary ---")

@@ -236,7 +236,7 @@ which is the actual risk behind "make sure it can use the same tools".
 |                       | bridge (`bridge.task = task`) so the  |
 |                       | acknowledgement has an entry point    |
 | `config.py`           | `MCP_MODEL_RESULT_CHARS` (default     |
-|                       | 600, `0` disables)                    |
+|                       | 24000, `0` disables)                  |
 | `dashboard.py`        | tool calls and results render as      |
 |                       | cards; new `tool_turn` line shows     |
 |                       | duration and how much the model saw   |

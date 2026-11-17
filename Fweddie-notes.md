@@ -153,10 +153,11 @@ server and checks `search` returns results for both `type="web"` and
 `type="news"`.
 
 **Result size cap** (`mcp_bridge._cap_for_model`). The model sees at most
-`MCP_MODEL_RESULT_CHARS` (1200) of any tool result; the full text still goes to
-the dashboard and the session folder. A web search returns full page bodies, so
-five results are 5400-7800 chars and *no single result* fits the cap. Until the
-fix, the cap dropped all five and the model received
+`MCP_MODEL_RESULT_CHARS` (24000; it was 1200 until 17 Nov 2026) of any tool
+result; the full text still goes to the dashboard and the session folder. A web
+search returns full page bodies, so five results are 5400-7800 chars and *no
+single result* fits a 1200-char cap. Until the fix, the cap dropped all five and
+the model received
 `{"results": [], "note": "all 5 results were too large to show"}` — an empty
 answer to a question the server had answered, which is why the agent re-asked
 "CES 2025 dates" four times. The cap now clips the prose inside each result
@@ -194,11 +195,36 @@ result's title or url alone exceeded the budget it answered
 is the same empty answer, so it now clips the identity fields and keeps the
 result recognisable instead.
 
-**What the budget buys, measured** (so the number can be argued with):
-a 5-result web page (full page bodies, ~1400 chars each) keeps **2 of 5**
-sources at 1200 chars. A real 5-result *news* payload keeps **3 of 5** at 1200
-and fits **whole at 2400**. That is the trade the cap makes, and it is the
-number to change if the agent ever needs more sources than that.
+**What the budget buys, measured** (so the number can be argued with).
+At the old 1200, a 5-result web page (full page bodies, ~1400 chars each) kept
+**2 of 5** sources, and a real 5-result *news* payload kept **2-3 of 5**. Every
+shape the tools return was over 1200:
+
+| payload                          | chars  | at 1200    | at 24000 |
+|----------------------------------|--------|------------|----------|
+| ddgs news, sorted to 5           |  2,073 | 2-3 of 5   | whole    |
+| Tavily news, 5 results           |  6,694 | 2 of 5     | whole    |
+| web search, 5 full page bodies   |  7,432 | 2 of 5     | whole    |
+| `read_file`                      | 12,094 | clipped    | whole    |
+| ollama web, 5 results            | 22,970 | 2 of 5     | whole    |
+
+So the default was raised to **24000** on 17 Nov 2026 — the smallest round
+number at which *no observed payload* is cut at all. The headroom is measured,
+not assumed: the endpoint accepts 1,000,000 chars (172,443 prompt tokens) and
+refuses at 2,000,000 ("exceeded max context length by 82,713 tokens"), a ceiling
+near 1.5M chars. The heaviest session in the event log was 13 tool calls /
+60,583 raw chars; at 24000 each that is 312,000, about a fifth of the ceiling.
+Latency is not a factor either — 120k chars answered in 2.5s, 600k in 4.6s.
+
+**Why it stays a hard cap and not a prompt suggestion.** A prompt can ask the
+model to be brief, but the model does not choose the size of a tool result — the
+server does, and one 23k-char web page arrives whole. Past the ceiling the
+endpoint returns HTTP 400, which reaches the pipeline as an `ErrorFrame` that
+`agent.py` only logs, so the turn goes silent rather than short. The prompt
+therefore *describes* the cap (the truncation paragraph in
+`TOOLS_SYSTEM_PROMPT`) while `MCP_MODEL_RESULT_CHARS` enforces it. The one thing
+the model can act on is asking for fewer results or a narrower query, and that
+is what the paragraph says.
 
 **Plain text still loses its tail.** `bash` output is head-sliced, so a verdict
 on the last line (a test summary, `git status`) is unreadable through the cap.

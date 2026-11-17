@@ -254,8 +254,7 @@ MCP_TOOL_TIMEOUT = float(os.environ.get("FWEDDIE_MCP_TOOL_TIMEOUT", 320))
 MCP_APPROVAL_TIMEOUT = float(os.environ.get("FWEDDIE_MCP_APPROVAL_TIMEOUT", 120))
 # How much of a tool result the MODEL is allowed to see, in characters.
 # The full result is kept for the dashboard and the session folder; only this
-# much is handed back to the LLM. The voice reply is one or two sentences, so
-# the model needs a couple of results, not a wall of JSON.
+# much is handed back to the LLM.
 #
 # The cap is applied STRUCTURALLY by mcp_bridge._cap_for_model: a JSON list
 # keeps whole results and says how many were dropped, instead of being cut
@@ -263,8 +262,37 @@ MCP_APPROVAL_TIMEOUT = float(os.environ.get("FWEDDIE_MCP_APPROVAL_TIMEOUT", 120)
 # 1.6 broken results -- the model got a title and a dangling fragment, and
 # could not see the `date` field it needed to tell old news from new.
 #
+# WHY 24000 AND NOT 1200. The old 1200 was chosen for a voice reply of one or
+# two sentences, before anything was measured. Measured on 17 Nov 2026, every
+# shape the tools actually return was being truncated at 1200, and two of them
+# lost the answer rather than just the bulk:
+#
+#   ddgs news, sorted to 5 results   2,073 ch   1200 -> 2 of 5   24000 -> 5/5
+#   Tavily news, 5 results           6,694 ch   1200 -> 2 of 5   24000 -> 5/5
+#   web search, 5 full page bodies   7,432 ch   1200 -> 2 of 5   24000 -> 5/5
+#   ollama web, 5 results           22,970 ch   1200 -> 2 of 5   24000 -> 5/5
+#   read_file                       12,094 ch   1200 -> clipped  24000 -> whole
+#
+# 24000 is the smallest round number at which *no observed payload* is cut at
+# all, so the cap goes back to being what it was meant to be -- a guard against
+# a pathological result, not the thing that decides the answer. The headroom is
+# real, not assumed: the endpoint accepts 1,000,000 chars (172,443 prompt
+# tokens) and only refuses at 2,000,000 ("exceeded max context length by
+# 82,713 tokens"), i.e. a ceiling near 1.5M chars. A heavy session in the event
+# log was 13 tool calls / 60,583 raw chars; at 24000 each that is 312,000 chars,
+# about a fifth of the ceiling. Latency is not a factor either: 120k chars
+# answered in 2.5s, 600k in 4.6s.
+#
+# The cap stays HARD rather than becoming a prompt suggestion. A prompt can ask
+# the model to be brief, but the model does not choose the size of a tool
+# result -- the server does, and one 23k-char web page arrives whole. Past the
+# ceiling the endpoint returns HTTP 400, which reaches the pipeline as an
+# ErrorFrame that agent.py only logs, so the turn goes silent instead of short.
+# The prompt therefore *describes* the cap (see TOOLS_SYSTEM_PROMPT) while this
+# number enforces it.
+#
 # 0 disables the cap (the old behaviour).
-MCP_MODEL_RESULT_CHARS = int(os.environ.get("FWEDDIE_MCP_MODEL_RESULT_CHARS", 1200))
+MCP_MODEL_RESULT_CHARS = int(os.environ.get("FWEDDIE_MCP_MODEL_RESULT_CHARS", 24000))
 
 # Search retries. OnIt's news branch calls ddgs once and turns any exception
 # into {"error": "Search failed: No results found."} -- ddgs RAISES rather than
@@ -427,7 +455,21 @@ TOOLS_SYSTEM_PROMPT = (
     "Never state a clock time you have not been given or read from a tool. "
     "For a time in another city or timezone, run `date` with the bash tool "
     "and a TZ prefix -- for example TZ=\"America/Anchorage\" date -- and read "
-    "the time from its output."
+    "the time from its output. "
+    # Truncation guidance. The hard cap in MCP_MODEL_RESULT_CHARS is the
+    # enforcement; this is the half that lives in the prompt, and it is the
+    # half the model can actually act on. A truncated payload says so in a
+    # `note` field ("showing 3 of 5 results"), and without this line the model
+    # reads the note as part of the answer -- or worse, does not read it and
+    # reports the three it can see as everything the search found. Asking for
+    # fewer results is a real lever: a 5-result news payload fits whole at
+    # 24000 chars, and asking for 20 of them does not.
+    "A tool result may be shortened to fit your context; when it is, a note "
+    "field says how much was shown and how much was cut. Treat what you got "
+    "as partial when the note says so, and never describe a shortened list as "
+    "everything that exists. If you need more than you were shown, ask the "
+    "tool again for fewer results or a narrower query rather than repeating "
+    "the same call."
 )
 
 
