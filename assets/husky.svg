@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Fweddie: a simple black-and-white husky head. Monochrome on purpose so
+       it reads on the dark dashboard and as a chat avatar at 24 px. -->
+  <path d="M13.5 4.5 L24.5 18.5 L13.5 26 Z" fill="#ffffff" stroke="#000000"
+        stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M50.5 4.5 L39.5 18.5 L50.5 26 Z" fill="#ffffff" stroke="#000000"
+        stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M15.8 10.2 L21.4 18.9 L15.8 22.2 Z" fill="#000000"/>
+  <path d="M48.2 10.2 L42.6 18.9 L48.2 22.2 Z" fill="#000000"/>
+  <path d="M32 10.5 C19.8 10.5 11.2 20.4 11.2 33.6 C11.2 47.2 20.6 56.8 32 56.8
+           C43.4 56.8 52.8 47.2 52.8 33.6 C52.8 20.4 44.2 10.5 32 10.5 Z"
+        fill="#ffffff" stroke="#000000" stroke-width="2.4"/>
+  <ellipse cx="24.2" cy="32.2" rx="3.5" ry="4.1" fill="#000000"/>
+  <ellipse cx="39.8" cy="32.2" rx="3.5" ry="4.1" fill="#000000"/>
+  <path d="M32 39.6 L28.6 44.4 L35.4 44.4 Z" fill="#000000"/>
+  <path d="M32 44.4 L32 48.2" stroke="#000000" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M32 48.2 C29.6 48.2 28.2 46.9 27.6 45.6" stroke="#000000"
+        stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <path d="M32 48.2 C34.4 48.2 35.8 46.9 36.4 45.6" stroke="#000000"
+        stroke-width="2.2" stroke-linecap="round" fill="none"/>
+</svg>

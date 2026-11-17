@@ -129,6 +129,141 @@ class MicControlWatcher(FrameProcessor):
         await super().cleanup()
 
 
+class DashboardControlWatcher(FrameProcessor):
+    """Consume the dashboard's Send (typed text) and Stop (interrupt) buttons.
+
+    Both are plain files next to the event log, the same mechanism the mic
+    toggle uses, for the same reason: the dashboard is a separate process that
+    may crash, restart or never start, and none of that may take the voice loop
+    down. The agent owns the files -- it deletes each one after acting on it --
+    so a message is answered exactly once even if the dashboard is left open
+    and its rerun loop writes again.
+
+    Why a pipeline stage rather than a callback
+    -------------------------------------------
+    Both actions are frames, and frames enter a pipeline through the task. A
+    typed message is appended to the SAME LLM context the spoken turns use
+    (``LLMMessagesAppendFrame`` with ``run_llm=True``), so it is
+    indistinguishable from a spoken turn afterwards: the context is shared, the
+    model sees one conversation, and the reply is spoken by the same TTS. A
+    stop is an ``InterruptionFrame``, which is exactly what a barge-in
+    broadcasts -- so the stop button cannot drift from real barge-in behaviour
+    (it stops the LLM mid-generation and drops the TTS's interruptible audio).
+
+    Placement: this stage sits BEFORE the user aggregator, because
+    ``queue_frame()`` pushes the typed message into this stage's own input
+    queue and it then flows DOWNSTREAM from here -- so the aggregator that
+    handles ``LLMMessagesAppendFrame`` must be downstream of this point. A stop
+    is an ``InterruptionFrame`` broadcast in both directions, so it reaches the
+    STT upstream and the LLM/TTS downstream regardless.
+    """
+
+    def __init__(self, typed_path: str, stop_path: str, bus=None,
+                 poll_secs: float = 0.2, **kwargs):
+        super().__init__(**kwargs)
+        self._typed_path = Path(typed_path)
+        self._stop_path = Path(stop_path)
+        self._bus = bus
+        self._poll = poll_secs
+        self._task: asyncio.Task | None = None
+        # Last id acted on, so a file that could not be deleted (permissions,
+        # a racing writer) still cannot be answered twice.
+        self._last_typed_id = None
+        self._last_stop_id = None
+
+    # -- file plumbing -----------------------------------------------------
+
+    def _take(self, path: Path) -> dict | None:
+        """Read a control file and delete it. Returns None when there is
+        nothing new to do.
+
+        Deleting before acting (rather than after) is deliberate: if acting
+        raises, the message is lost rather than answered twice. A dropped
+        question is a visible, recoverable problem -- the person sees no reply
+        and asks again -- while a duplicate is a confusing double answer with
+        two replies spoken over each other.
+        """
+        try:
+            if not path.exists():
+                return None
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 -- a half-written file is retried next tick
+            return None
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return payload if isinstance(payload, dict) else None
+
+    # -- actions -----------------------------------------------------------
+
+    async def _handle_typed(self, payload: dict) -> None:
+        text = (payload.get("text") or "").strip()
+        if not text:
+            return
+        msg_id = payload.get("id")
+        if msg_id is not None and msg_id == self._last_typed_id:
+            return
+        self._last_typed_id = msg_id
+
+        logger.info(" typed: {}", text)
+        if self._bus is not None:
+            # source="typed" lets the dashboard tell a typed turn from a
+            # spoken one -- they render the same otherwise, and a person
+            # reading back the log should be able to see which was which.
+            await self._bus.emit("user_text", text=text, source="typed")
+
+        # Appending to the context (rather than injecting a fake transcription
+        # frame) is the supported path: the aggregator adds the message and,
+        # with run_llm=True, pushes an LLMContextFrame that starts inference.
+        # A fake TranscriptionFrame would instead have to satisfy the turn
+        # strategies -- VAD start, VAD stop, transcript timeout -- none of
+        # which a typed message has any reason to fake.
+        from pipecat.frames.frames import LLMMessagesAppendFrame
+        await self.queue_frame(
+            LLMMessagesAppendFrame(
+                messages=[{"role": "user", "content": text}], run_llm=True
+            )
+        )
+
+    async def _handle_stop(self, payload: dict) -> None:
+        stop_id = payload.get("id")
+        if stop_id is not None and stop_id == self._last_stop_id:
+            return
+        self._last_stop_id = stop_id
+
+        logger.info(" stop requested from the dashboard")
+        if self._bus is not None:
+            await self._bus.emit("interrupted", source="dashboard")
+        # Same frame a barge-in broadcasts: stops LLM generation and drops the
+        # TTS's interruptible audio contexts, so the bot goes quiet mid-word.
+        await self.broadcast_interruption()
+
+    async def _watch(self):
+        while True:
+            typed = self._take(self._typed_path)
+            if typed is not None:
+                await self._handle_typed(typed)
+            stop = self._take(self._stop_path)
+            if stop is not None:
+                await self._handle_stop(stop)
+            await asyncio.sleep(self._poll)
+
+    # -- pipeline ----------------------------------------------------------
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, StartFrame) and self._task is None:
+            self._task = asyncio.create_task(self._watch())
+        await self.push_frame(frame, direction)
+
+    async def cleanup(self):
+        if self._task is not None:
+            self._task.cancel()
+            self._task = None
+        await super().cleanup()
+
+
 class FweddieLogger(FrameProcessor):
     """Observer that prints what the agent hears and says, and records it to
     the event bus so the dashboard can show the interaction live.
@@ -364,6 +499,19 @@ def describe_asr() -> str:
             label += " + final " + config.ASR_FINAL_MODEL
         return label
     return "whisper " + config.ASR_MODEL
+
+
+def pipeline_stage_names() -> list[str]:
+    """The stage order ``build_pipeline`` produces, as class names.
+
+    Exists so a test can assert on the ORDER without starting the pipeline --
+    starting it needs a microphone and an LLM. Order is not cosmetic here: the
+    dashboard's typed text is queued as a frame that flows DOWNSTREAM from the
+    stage that queues it, so a watcher placed after the aggregator that handles
+    it is a silent no-op. That exact mistake was made once already.
+    """
+    pipeline, _task, _inp, _out = build_pipeline("stage-order-probe")
+    return [type(p).__name__ for p in pipeline._processors]
 
 
 def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None" = None,
@@ -634,8 +782,26 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         stages.append(PartialTranscriptTap(bus))
     # The mic toggle pushes STTMuteFrame UPSTREAM, so it must sit downstream of
     # the STT for that frame to reach it.
-    stages.append(MicControlWatcher(
-        str(Path(config.DASHBOARD_LOG).with_suffix(".mic_control.json"))))
+    stages.append(MicControlWatcher(config.DASHBOARD_MIC_FILE))
+    # Typed text and the Stop button from the dashboard.
+    #
+    # MUST sit BEFORE the user aggregator. A typed message is delivered by
+    # queue_frame(), which pushes the frame into this stage's own input queue
+    # and lets it flow DOWNSTREAM from here -- so anything upstream of this
+    # point never sees it, and the aggregator that actually handles
+    # LLMMessagesAppendFrame is downstream. Placing this after the aggregator
+    # made Send a no-op: the frame was queued, flowed away from the aggregator,
+    # and the question was never added to the context.
+    #
+    # A stop is an InterruptionFrame, which broadcast_interruption() sends in
+    # both directions, so it reaches the STT and the transports upstream and
+    # the LLM and TTS downstream from here either way.
+    stages.append(DashboardControlWatcher(
+        config.DASHBOARD_TYPED_FILE,
+        config.DASHBOARD_STOP_FILE,
+        bus=bus,
+        poll_secs=config.DASHBOARD_CONTROL_POLL_SECS,
+    ))
     stages.append(user_agg)
     stages.append(llm)
     # TTS comes straight after the LLM. The assistant aggregator must come AFTER

@@ -215,6 +215,37 @@ Run the suite with the venv interpreter; every file is standalone (`python test_
 | `test_tool_secrets.py` | tool-key resolution: file overrides keychain, deleting the file falls back to the keychain, blanks are omitted, YAML retyping is coerced (offline) |
 | `test_tool_secrets_live.py` | the key actually reaches the MCP subprocess — calls `get_weather` end to end (network) |
 | `test_bargein.py` / `test_guard.py` / `test_eventbus.py` | barge-in wiring, tool guardrails, dashboard events |
+| `test_dashboard_ui.py` | the dashboard's controls write the right control files: Send writes the typed text and clears the box, Send becomes Stop while a turn is in flight, Stop writes the stop file, the mic toggle flips (8 checks, via Streamlit's AppTest) |
+| `test_dashboard_controls.py` | the agent side of those controls: a typed message reaches the LLM context as a user turn, the control file is consumed so it is never answered twice, Stop broadcasts exactly one interruption, and the watcher really is upstream of the aggregator in `build_pipeline` |
+
+## 🖥️ Dashboard
+
+A dark chat interface, modelled on the Ollama chat window, that drives the agent
+by voice **or** by typing. It is a separate process:
+
+```
+FWEDDIE_DASHBOARD=1 .venv/bin/python agent.py          # terminal 1
+FWEDDIE_DASHBOARD_LOG=/tmp/fweddie_events.jsonl \
+  .venv/bin/python -m streamlit run dashboard.py       # terminal 2
+```
+
+The two talk only through files next to the event log, so either can restart
+without taking the other down:
+
+| control | file | what the agent does |
+|---|---|---|
+| Mic toggle | `<log>.mic_control.json` | pushes `STTMuteFrame` to the ASR (barge-in still works) |
+| Send (typed text) | `<log>.typed.json` | appends the message to the LLM context and runs inference — the reply is spoken like any other |
+| Stop | `<log>.stop.json` | broadcasts an `InterruptionFrame`: the same path a barge-in takes, so it stops the LLM mid-generation and cuts the TTS |
+
+The composer is pinned to the bottom, with the mic on the left (where Ollama
+puts web search), the text box in the middle, and Send — which becomes Stop
+while a turn is in flight — on the right. File upload and model selection are
+disabled placeholders, kept so the layout is already final.
+
+The mic is blue while the agent is accepting audio and monochrome while muted.
+`tools/shot.py` screenshots the running page after it hydrates (plain
+`chromium --screenshot` captures Streamlit's blank shell instead).
 
 ## 📚 References
 - **Framework:** [Pipecat](https://github.com/pipecat-ai/pipecat)

@@ -424,6 +424,48 @@ DASHBOARD_LOG = os.environ.get("FWEDDIE_DASHBOARD_LOG", "/tmp/fweddie_events.jso
 DASHBOARD_HOST = os.environ.get("FWEDDIE_DASHBOARD_HOST", "0.0.0.0")
 DASHBOARD_PORT = int(os.environ.get("FWEDDIE_DASHBOARD_PORT", 8501))
 
+# How often the agent polls the dashboard's control files (mic toggle, typed
+# text, stop button). These are plain files next to the log -- the same
+# mechanism the mic toggle has always used -- so the dashboard can stay a
+# separate process that may crash or never start without taking the voice loop
+# with it.
+#
+# 0.2 s: a person who types a question and clicks Send expects the agent to
+# start answering immediately, and this is the only latency the poll adds. The
+# cost is four small stat() calls per second, which is nothing next to the
+# audio callback. Do not raise this to 1 s "to save cycles": the stop button
+# would then take up to a second to actually stop the bot talking, which reads
+# as the button being broken.
+DASHBOARD_CONTROL_POLL_SECS = float(
+    os.environ.get("FWEDDIE_DASHBOARD_CONTROL_POLL", "0.2"))
+
+# The typed-text inbox. The dashboard writes {"id": ..., "text": ...} here when
+# the Send button is pressed; the agent consumes the file (deletes it) so the
+# same message is never answered twice.
+DASHBOARD_TYPED_FILE = os.environ.get(
+    "FWEDDIE_DASHBOARD_TYPED",
+    str(Path(DASHBOARD_LOG).with_name(Path(DASHBOARD_LOG).name + ".typed.json")))
+
+# The stop button. The dashboard writes {"id": ..., "ts": ...}; the agent
+# consumes it and interrupts the turn exactly as a barge-in would.
+DASHBOARD_STOP_FILE = os.environ.get(
+    "FWEDDIE_DASHBOARD_STOP",
+    str(Path(DASHBOARD_LOG).with_name(Path(DASHBOARD_LOG).name + ".stop.json")))
+
+# The mic toggle. Unlike the two above this file is *state*, not an action: it
+# persists, and the agent reads it every poll rather than consuming it.
+#
+# Named by appending to the log's filename, not with Path.with_suffix(). With
+# with_suffix() the name was "fweddie_events.mic_control.json" -- the ".jsonl"
+# was REPLACED -- while the other two control files appended. Two naming rules
+# for three sibling files in one directory is a trap: the dashboard test looked
+# for the appended name, found nothing, and reported the working toggle as
+# broken. Default unchanged from the old with_suffix() path so an existing
+# deployment keeps reading the same file.
+DASHBOARD_MIC_FILE = os.environ.get(
+    "FWEDDIE_DASHBOARD_MIC",
+    str(Path(DASHBOARD_LOG).with_suffix(".mic_control.json")))
+
 # ---------------------------------------------------------------------------
 # Persona / system prompt
 # ---------------------------------------------------------------------------

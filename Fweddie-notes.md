@@ -641,3 +641,74 @@ End-to-end on the incident's own two halves ("Senate elections." / pause /
     pause 1.3 s -> 2 turns (still split, as it must be)
 
 Before the fix it split at every pause tested, including 0.5 s.
+
+---
+
+# Dashboard: Ollama-style chat, with voice and typing
+
+Branch `dashboard`. The old dashboard was a sidebar toggle plus a transcript
+read from the event log. It is now a chat window modelled on Ollama's, dark,
+with the microphone where Ollama puts web search and a Send button that becomes
+Stop mid-turn.
+
+## What the agent had to gain
+
+Two controls did not exist: typing a question, and stopping the bot. Both are
+files next to the event log, the mechanism the mic toggle already used, and both
+are turned into frames by one new stage, `DashboardControlWatcher`.
+
+    Send -> <log>.typed.json -> LLMMessagesAppendFrame(run_llm=True)
+    Stop -> <log>.stop.json  -> broadcast_interruption()
+
+`LLMMessagesAppendFrame` appends to the SAME LLMContext the spoken turns use, so
+a typed question is indistinguishable from a spoken one afterwards: one
+conversation, one TTS. An `InterruptionFrame` is exactly what a barge-in
+broadcasts, so Stop cannot drift from real barge-in behaviour -- it stops the
+LLM mid-generation and drops the TTS's interruptible audio contexts.
+
+## The bug worth recording
+
+The watcher was first placed AFTER `LLMUserAggregator`, on the reasoning that
+the aggregator is what handles the frame. It is -- but `queue_frame()` pushes
+into the *calling stage's* input queue, and the frame then flows DOWNSTREAM from
+there. A watcher downstream of the aggregator therefore hands its frame to the
+LLM and the TTS, and the aggregator never sees it. Send did nothing at all, and
+nothing logged an error.
+
+`test_dashboard_controls.py` pins both halves: that a frame queued by the
+watcher reaches an aggregator placed after it, and that `build_pipeline` really
+does put the watcher first (`agent.pipeline_stage_names()`). Reordering the test
+pipeline to the broken order makes check 1 fail with an empty context, which is
+how the test was validated.
+
+## Streamlit details that cost time
+
+* `st.button` cannot go inside `st.form` (raises). The composer is therefore a
+  container of columns, not a form. Buttons already trigger a full rerun, so no
+  `st.rerun(scope="fragment")` is needed -- and that scope raises outside a
+  fragment anyway.
+* A keyed `text_input` cannot be cleared in the run that rendered it. Send
+  raises a `clear_box` flag and the next run clears it before the widget is
+  built.
+* `st.chat_message` rejects SVG avatars (`image_to_url` uses `channels="RGB"`),
+  so the husky head ships as PNG, drawn with PIL. `cairosvg` is not installed.
+* Keyed widgets get a `.st-key-<key>` class, which is how the mic and the Send
+  button are styled without depending on widget order. There is no supported
+  way to add a class to a Streamlit container, so the blue "listening" state is
+  a rule emitted only while the mic is on, not a toggled class.
+* Specificity: a rule `.st-key-composer [data-testid="stBaseButton-secondary"]`
+  (two classes) outranks `.st-key-sendbtn button` (one class + element). The
+  first stylesheet set Send's background and watched it lose. The per-button
+  rules now repeat the attribute selector so they tie on specificity and win on
+  order. Verified by reading computed styles over CDP, not by eye.
+* `chromium --screenshot` captures Streamlit's blank white shell because the
+  page fills in over a websocket after load. `tools/shot.py` drives Chromium
+  over the DevTools protocol and waits for the app's own markup.
+
+## Deliberately left alone
+
+`test_pipeline_asr.py` still fails its two clips with internal 0.65-0.70 s
+pauses (3.20 s and 6.01 s against a 2.5 s budget). That is pre-existing on
+`main` (3.22 s / 6.11 s there, measured by stashing this branch's changes) and
+is the known consequence of holding those pauses inside one utterance instead
+of splitting it. Not touched here.

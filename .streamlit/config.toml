@@ -1,0 +1,20 @@
+# Streamlit theme for the Fweddie dashboard.
+#
+# The dashboard is deliberately dark, to sit alongside the Ollama chat UI it is
+# modelled on. Setting the palette here (rather than only in injected CSS) means
+# every built-in widget -- the text field, buttons, the code blocks a tool result
+# renders into -- is legible even if a CSS selector below ever stops matching a
+# Streamlit release.
+[theme]
+base = "dark"
+primaryColor = "#3b9eff"
+backgroundColor = "#0a0a0a"
+secondaryBackgroundColor = "#141416"
+textColor = "#e8eaed"
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
