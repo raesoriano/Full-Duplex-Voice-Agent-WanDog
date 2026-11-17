@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -354,7 +355,7 @@ def _search_failed(text: str) -> bool:
     return isinstance(data, dict) and bool(data.get("error"))
 
 
-def _cap_for_model(text: str, limit: int) -> str:
+def _cap_for_model(text: str, limit: int, query: Optional[str] = None) -> str:
     """Return the part of a tool result the LLM is allowed to see.
 
     The voice reply is one or two sentences, so the model needs the head of the
@@ -370,13 +371,17 @@ def _cap_for_model(text: str, limit: int) -> str:
     text, a dict, a malformed payload -- falls back to the old head-slice,
     which is right for a file read or a shell transcript.
 
+    ``query`` is the search that produced the result. When a result has to be
+    shortened, the passage matching the question is kept instead of only the
+    opening -- see ``_cap_best_window``.
+
     The full text is untouched: it goes to the dashboard and the session
     folder. ``limit <= 0`` disables the cap.
     """
     if limit <= 0 or len(text) <= limit:
         return text
 
-    capped = _cap_json_list(text, limit)
+    capped = _cap_json_list(text, limit, query)
     if capped is not None:
         return capped
 
@@ -384,11 +389,109 @@ def _cap_for_model(text: str, limit: int) -> str:
             + f"\n[truncated: showing {limit} of {len(text)} chars]")
 
 
-def _cap_json_list(text: str, limit: int) -> Optional[str]:
-    """Keep whole items of a JSON list until ``limit``, or None if not a list.
+# Fields that stay whole however tight the budget gets. A voice model needs the
+# url to cite a result and the date to tell old news from new; cutting either
+# costs it the very thing it searched for, and neither is the bulky field.
+_CAP_KEEP_INTACT = frozenset({
+    "url", "link", "href", "title", "date", "published", "published_date",
+    "source", "id", "name", "type", "error",
+})
 
-    The budget has to be reserved for the trailer before items are counted, so
-    the answer is found by trying, not by arithmetic on the input length.
+# How much prose to keep per result, tried in order. ``None`` means "try whole
+# results first", so a payload that already fits is passed through untouched:
+# news results are short and must not be abbreviated needlessly.
+_CAP_CLIP_LADDER = (None, 700, 500, 350, 250, 180, 120, 80, 50)
+
+# Words too common to identify the passage that answers a question.
+_CAP_STOPWORDS = frozenset(
+    "a an the is are was were be been being what when where who whom whose why "
+    "how does do did doing of in on at to for from by with about into over after "
+    "and or but if then than that this these those it its i you we they he she "
+    "me my your our their there here can could should would will shall may might "
+    "please tell give show find latest new news".split()
+)
+
+# Share of the budget given to the opening of a passage before the window that
+# matches the question starts. A page's first lines are its title and nav; the
+# answer is usually a paragraph or two in.
+_CAP_HEAD_SHARE = 0.4
+
+
+def _cap_terms(query: Optional[str]) -> list:
+    """The content words of a query, for locating the passage that answers it."""
+    if not query:
+        return []
+    words = re.findall(r"[a-z0-9]+", str(query).lower())
+    return [w for w in words if len(w) > 1 and w not in _CAP_STOPWORDS]
+
+
+def _cap_best_window(text: str, terms: list, size: int):
+    """Start of the ``size``-char window holding the most query terms.
+
+    A prefix is the wrong shape for a web result: the first 250 chars of a CES
+    page are "About CES: CES is the most powerful tech event in the world...",
+    while "CES 2025 takes place Jan. 7-10, 2025, in Las Vegas" sits at char 388.
+    The model was given the boilerplate and asked again. So the clip keeps the
+    opening *and* jumps to the densest passage for the question's own words.
+    """
+    if not terms or len(text) <= size:
+        return 0
+    low = text.lower()
+    hits = sorted(m.start() for t in terms for m in re.finditer(re.escape(t), low))
+    if not hits:
+        return 0
+    best, best_hits = hits[0], -1
+    for h in hits:
+        n = sum(1 for x in hits if h <= x < h + size)
+        if n > best_hits:
+            best_hits, best = n, h
+    # Start a little before the first matching term so the sentence is whole.
+    return max(0, min(best - size // 4, len(text) - size))
+
+
+def _cap_clip(value, clip: int, terms: Optional[list] = None):
+    """Shrink the prose inside a result, leaving identity fields whole."""
+    if isinstance(value, str):
+        if len(value) <= clip:
+            return value
+        if terms:
+            head = max(40, int(clip * _CAP_HEAD_SHARE))
+            start = _cap_best_window(value, terms, clip - head)
+            # Only jump when the window is actually past the head; otherwise the
+            # two pieces would overlap and repeat the same sentence.
+            if start > head:
+                return (value[:head].rstrip() + " \u2026 "
+                        + value[start:start + clip - head].strip() + "\u2026")
+        return value[:clip].rstrip() + "\u2026"
+    if isinstance(value, list):
+        return [_cap_clip(v, clip, terms) for v in value]
+    if isinstance(value, dict):
+        return {k: (v if k in _CAP_KEEP_INTACT else _cap_clip(v, clip, terms))
+                for k, v in value.items()}
+    return value
+
+
+def _cap_json_list(text: str, limit: int, query: Optional[str] = None) -> Optional:
+    """Fit a JSON list into ``limit`` chars without ever emptying it.
+
+    Two stages, because there are two different reasons a payload is too big:
+
+    1. **Too many results.** Drop whole results from the tail and say how many
+       were dropped. This is the news shape -- a handful of short, dated
+       results -- and it is the only stage the cap used to have.
+    2. **Each result is too big.** A web search returns full page bodies
+       (~1000-1600 chars each), so five results is 5400-7800 chars and *not
+       one* fits under the cap. Stage 1 alone therefore dropped all five and
+       handed the model ``{"results": [], "note": "all 5 results were too large
+       to show"}`` -- an empty answer to a question the server had answered.
+       That is why the model re-asked "CES 2025 dates" four times: it was
+       reading an empty list, not a stale one.
+
+    Stage 2 clips the prose inside each result while keeping titles, urls,
+    dates and sources intact, and clips around the passage that matches
+    ``query`` rather than blindly from the front. The model gets at least one
+    result whenever the server returned one, and the note says the text was cut
+    so it knows the snippet is abbreviated rather than whole.
     """
     stripped = text.strip()
     if not stripped.startswith("["):
@@ -400,35 +503,76 @@ def _cap_json_list(text: str, limit: int) -> Optional[str]:
     if not isinstance(items, list) or not items:
         return None
 
-    def render(keep: int) -> str:
-        dropped = len(items) - keep
-        if dropped <= 0:
+    total = len(items)
+    terms = _cap_terms(query)
+
+    def render(keep: int, clip: Optional[int]) -> str:
+        if keep >= total and clip is None:
             return json.dumps(items, ensure_ascii=False)
+        shown = items[:keep]
+        if clip is not None:
+            shown = [_cap_clip(item, clip, terms) for item in shown]
+        note = f"showing {keep} of {total} results"
+        if keep < total:
+            note += f"; {total - keep} dropped to fit the model's context"
+        if clip is not None:
+            note += (f"; each result's text is cut to {clip} chars, while its "
+                     f"title, url and date are intact")
         # The trailer is deliberately plain: a voice model reads it as a
         # sentence ("showing 2 of 5 results"), not as another result object.
         return json.dumps(
-            {
-                "results": items[:keep],
-                "showing": keep,
-                "total": len(items),
-                "note": f"showing {keep} of {len(items)} results; the rest "
-                        f"were dropped to fit the model's context",
-            },
+            {"results": shown, "showing": keep, "total": total, "note": note},
             ensure_ascii=False,
         )
 
-    # Largest prefix that fits. Items vary in size, so walk down from the full
-    # list rather than assuming an average.
-    for keep in range(len(items), 0, -1):
-        out = render(keep)
-        if len(out) <= limit:
-            return out
-    # Not even one whole result fits. A truncated single result is worse than
-    # an honest empty answer, so say what happened and keep the count.
+    # Items vary in size, so walk down from the full list rather than assuming
+    # an average. Collect every (clip, keep) that fits instead of taking the
+    # first one: the first fit is always the *longest* text, which means one
+    # result quoted at 700 chars rather than three at 250. For a voice answer
+    # that is the wrong trade -- two independent sources beat one long one --
+    # so the choice is made explicitly below.
+    options = []
+    for clip in _CAP_CLIP_LADDER:
+        for keep in range(total, 0, -1):
+            out = render(keep, clip)
+            if len(out) <= limit:
+                options.append((keep, clip, out))
+                break
+
+    if options:
+        # Prefer a configuration that keeps at least two results, and among
+        # those prefer the least clipping (largest clip, then most results).
+        # A news payload that already fits is chosen here untouched, because
+        # clip=None is the largest clip and it keeps its usual 2-3 results.
+        def rank(o):
+            return (o[1] if o[1] is not None else 10 ** 6, o[0])
+
+        many = [o for o in options if o[0] >= 2]
+        return max(many or options, key=rank)[2]
+
+    # Even one result clipped to the shortest step will not fit, which means
+    # the identity fields themselves (a long url, a long title) blow the budget.
+    # Give the model the first result's skeleton rather than an empty list.
+    skeleton = [
+        {k: v for k, v in item.items() if k in _CAP_KEEP_INTACT}
+        if isinstance(item, dict) else item
+        for item in items[:1]
+    ]
+    out = json.dumps(
+        {"results": skeleton, "showing": 1, "total": total,
+         "note": f"only the first of {total} results fits within {limit} chars, "
+                 f"and only its title, url, date and source; the body text was "
+                 f"dropped"},
+        ensure_ascii=False,
+    )
+    if len(out) <= limit:
+        return out
+    # A single result's identity alone is over budget (a very long url). Say so
+    # with a valid answer that still states a result existed.
     return json.dumps(
-        {"results": [], "showing": 0, "total": len(items),
-         "note": f"all {len(items)} results were too large to show "
-                 f"within {limit} chars"},
+        {"results": [], "showing": 0, "total": total,
+         "note": f"the first result alone is larger than {limit} chars (its url "
+                 f"and title), so no result could be shown"},
         ensure_ascii=False,
     )
 
@@ -752,7 +896,8 @@ class ToolBridgeProcessor(FrameProcessor):
             # the full text stays in the session folder and on the dashboard.
             # This is what keeps a huge MCP payload from being the thing that
             # decides whether the agent speaks.
-            model_text = _cap_for_model(full, config.MCP_MODEL_RESULT_CHARS)
+            model_text = _cap_for_model(full, config.MCP_MODEL_RESULT_CHARS,
+                                        query=call_args.get("query"))
 
             # Layer 1: make the tool turn observable. The event log used to
             # record the result but not what happened next, which is why the

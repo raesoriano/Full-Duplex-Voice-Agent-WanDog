@@ -468,12 +468,26 @@ TOOL_SECRETS_PATH = Path(
 
 # keyring key -> env var the tool server actually reads. The left side is the
 # name OnIt stores under; the right side is what the server consults.
+#
+# `ollama_api_key` is deliberately NOT forwarded. OnIt's search chain is Tavily
+# -> DuckDuckGo only (web_search.py:180-213); it has no Ollama tier, so the key
+# bought nothing there. Ollama's web search is metered per call, so a key that
+# is merely present is a liability: any server that reads OLLAMA_API_KEY would
+# start spending on the first search. The key stays in secrets.yaml because the
+# LLM endpoint uses it via ONIT_LLM_BASE_URL; it is never handed to a tool
+# server.
 TOOL_SECRETS: dict[str, str] = {
     "openweathermap_api_key": "OPENWEATHERMAP_API_KEY",  # get_weather
     "tavily_api_key": "TAVILY_API_KEY",                  # search, first tier
-    "ollama_api_key": "OLLAMA_API_KEY",                  # search, second tier
     "github_token": "GITHUB_TOKEN",                      # github_repo, git push
     "huggingface_token": "HF_TOKEN",                     # model downloads
+}
+
+# Secrets we refuse to forward even if a future TOOL_SECRETS entry names them.
+# Separate from the map so the reason survives, and so a test can assert it.
+FORBIDDEN_TOOL_SECRETS: dict[str, str] = {
+    "ollama_api_key": "Ollama web search is metered per call; never expose it "
+                      "to a tool server",
 }
 
 _secrets_cache: dict | None = None
@@ -569,6 +583,8 @@ def tool_secret_env() -> dict[str, str]:
     """
     resolved: dict[str, str] = {}
     for name, env_var in TOOL_SECRETS.items():
+        if name in FORBIDDEN_TOOL_SECRETS:
+            continue
         value = resolve_tool_secret(name)
         if value:
             resolved[env_var] = value

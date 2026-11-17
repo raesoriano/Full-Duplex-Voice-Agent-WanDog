@@ -71,9 +71,14 @@ $EDITOR secrets.yaml          # quote every value
 |---|---|---|
 | `openweathermap_api_key` | `OPENWEATHERMAP_API_KEY` | `get_weather` |
 | `tavily_api_key` | `TAVILY_API_KEY` | `search` (first tier; else DuckDuckGo) |
-| `ollama_api_key` | `OLLAMA_API_KEY` | `search` (second tier), Ollama hosts |
+| `ollama_api_key` | — not forwarded | LLM endpoint only; never a tool |
 | `github_token` | `GITHUB_TOKEN` | `github_repo`, `git push` |
 | `huggingface_token` | `HF_TOKEN` | HuggingFace model downloads |
+
+`ollama_api_key` is deliberately kept out of the spawned servers' environment.
+OnIt's search chain is Tavily → DuckDuckGo and has no Ollama tier, while
+Ollama's web search is metered per call — a forwarded key would be a cost
+liability with no benefit. See `FORBIDDEN_TOOL_SECRETS` in `config.py`.
 
 Secrets are injected into the spawned subprocess only — never into Fweddie's
 own process, and an ambient `export` still wins over both sources. Startup

@@ -241,6 +241,108 @@ async def test_search_retry() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# 4. A web payload that does not fit must never arrive empty
+# ---------------------------------------------------------------------------
+def web_payload() -> str:
+    """Five real-shaped web results: full page bodies, no dates, ~1.2k each."""
+    return json.dumps([
+        {"title": f"Result {i} - Wikipedia", "url": f"https://example.com/{i}",
+         "content": ("boilerplate about the site " * 10)
+                    + f" The answer is item {i}. "
+                    + ("more text about other things " * 20),
+         "source": "tavily"}
+        for i in range(5)
+    ])
+
+
+def test_web_never_empty() -> bool:
+    """The bug: 5 full-body results = 5400-7800 chars, so no single result fit
+    under the cap, and _cap_json_list returned {"results": []}. The model got an
+    empty answer to a question the server had answered, and re-asked."""
+    print("\n10. a web payload too large to keep whole still reaches the model")
+    ok = True
+    text = web_payload()
+    total = len(json.loads(text))
+    for limit in (1200, 900, 600):
+        out = mcp_bridge._cap_for_model(text, limit, query="what is item 3")
+        data = json.loads(out)
+        rows = data.get("results", [])
+        ok &= check(f"limit {limit}: {len(rows)} of {total} results kept",
+                    len(rows) >= 1, f"{len(out)} chars")
+        # Identity must survive: a result with no url cannot be cited.
+        ok &= check(f"limit {limit}: every kept result still has its url",
+                    all(r.get("url") for r in rows))
+    # The old behaviour, for contrast: dropping whole results alone is empty.
+    dropped_only = json.dumps(
+        {"results": [], "showing": 0, "total": total,
+         "note": f"all {total} results were too large to show"})
+    ok &= check("the pre-fix shape was an empty result list",
+                json.loads(dropped_only)["results"] == [])
+    return ok
+
+
+def test_web_keeps_more_than_one() -> bool:
+    """Two independent sources beat one long one for a spoken answer."""
+    print("\n11. the cap prefers two results over one long one")
+    text = web_payload()
+    out = mcp_bridge._cap_for_model(text, 1200, query="item 3")
+    rows = json.loads(out).get("results", [])
+    return check(f"kept {len(rows)} results", len(rows) >= 2,
+                 f"{len(out)} chars")
+
+
+def test_web_clip_finds_the_answer() -> bool:
+    """A prefix clip keeps a page's nav bar; the answer is often 300+ chars in.
+    The window must jump to the passage matching the query."""
+    print("\n12. the clip keeps the passage that answers the question")
+    filler = "About us. Our team. Contact. Careers. " * 12
+    text = json.dumps([{
+        "title": "CES", "url": "https://example.com/ces",
+        "content": filler + " CES 2025 takes place Jan. 7-10, 2025, in Las Vegas. " + filler,
+        "source": "tavily",
+    }] + [{"title": f"r{i}", "url": f"https://e.com/{i}",
+           "content": filler * 2, "source": "tavily"} for i in range(4)])
+    ok = True
+    windowed = mcp_bridge._cap_for_model(text, 900, query="when is CES 2025")
+    ok &= check("the answer survives the windowed clip",
+                "Jan. 7-10, 2025" in windowed, f"{len(windowed)} chars")
+    # And prove the plain prefix would have lost it, so the window earns its keep.
+    prefix = filler[:250]
+    ok &= check("a plain 250-char prefix would have missed it",
+                "Jan. 7-10" not in prefix)
+    return ok
+
+
+def test_cap_query_optional() -> bool:
+    """_cap_for_model must still work when no query is passed (other tools)."""
+    print("\n13. the cap works without a query")
+    out = mcp_bridge._cap_for_model(web_payload(), 1200)
+    rows = json.loads(out).get("results", [])
+    return check(f"kept {len(rows)} results with no query", len(rows) >= 1)
+
+
+# ---------------------------------------------------------------------------
+# 5. Ollama's web search must never be reachable
+# ---------------------------------------------------------------------------
+def test_ollama_never_forwarded() -> bool:
+    print("\n14. Ollama's metered web search is not handed to any tool server")
+    ok = check("ollama_api_key is not in TOOL_SECRETS",
+               "ollama_api_key" not in config.TOOL_SECRETS)
+    ok &= check("it is listed in FORBIDDEN_TOOL_SECRETS",
+                "ollama_api_key" in config.FORBIDDEN_TOOL_SECRETS)
+    exported = config.tool_secret_env()
+    ok &= check("tool_secret_env() is a {env_var: value} dict",
+                isinstance(exported, dict))
+    ok &= check("OLLAMA_API_KEY is absent from the spawn environment",
+                "OLLAMA_API_KEY" not in exported,
+                str(sorted(exported))[:80])
+    ok &= check("the other tool keys are still exported",
+                bool(exported) and all(isinstance(v, str) and v
+                                       for v in exported.values()))
+    return ok
+
+
+# ---------------------------------------------------------------------------
 # 4. The prompt carries today's date
 # ---------------------------------------------------------------------------
 def test_prompt_has_date() -> bool:
@@ -282,6 +384,11 @@ async def main() -> int:
         await test_search_retry(),
         test_prompt_has_date(),
         test_cap_default(),
+        test_web_never_empty(),
+        test_web_keeps_more_than_one(),
+        test_web_clip_finds_the_answer(),
+        test_cap_query_optional(),
+        test_ollama_never_forwarded(),
     ]
     print("\n--- summary ---")
     print(f"  {sum(results)}/{len(results)} groups passed")
