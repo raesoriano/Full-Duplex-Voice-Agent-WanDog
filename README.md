@@ -76,6 +76,60 @@ $EDITOR secrets.yaml          # quote every value
 | `github_token` | `GITHUB_TOKEN` | `github_repo`, `git push` |
 | `huggingface_token` | `HF_TOKEN` | HuggingFace model downloads |
 
+### News freshness
+
+`search` with `type="news"` is the path for anything current. Fweddie tunes it
+on its own side, because OnIt's news branch takes no time filter and orders by
+relevance rather than date:
+
+| Env var | Default | What it does |
+|---|---|---|
+| `FWEDDIE_MCP_NEWS_OVERFETCH` | `10` | results to request before trimming |
+| `FWEDDIE_MCP_NEWS_SORT` | `1` | sort newest-first and add an `age` field |
+| `FWEDDIE_MCP_NEWS_REFRESH_RETRIES` | `2` | extra calls when the newest hit is stale |
+| `FWEDDIE_MCP_NEWS_REFRESH_BUDGET` | `4.0` | seconds the refresh may spend |
+| `FWEDDIE_MCP_NEWS_FRESH_DAYS` | `0` | newest age that counts as fresh |
+| `FWEDDIE_MCP_NEWS_BACKEND` | `tavily` | `tavily` = Tavily first, ddgs fallback; `onit` = always ddgs |
+| `FWEDDIE_MCP_NEWS_TAVILY_DAYS` | `1` | Tavily's recency window (1-7 days) |
+| `FWEDDIE_MCP_NEWS_TAVILY_DEPTH` | `advanced` | Tavily search depth for news |
+
+Results now reach the model newest-first and carry `age` ("today", "3 days
+ago") beside `date`, so the agent says "as of today" only when that is true.
+Set `FWEDDIE_MCP_NEWS_SORT=0` to restore the server's own ordering.
+
+#### Why news does not go to OnIt's news branch by default
+
+OnIt's `search(type="news")` calls ddgs and nothing else — it never reaches the
+Tavily tier its own *web* branch uses. ddgs' news engine is Bing-backed
+(`ddgs/engines/duckduckgo_news.py`, `provider = "bing"`). Measured on 17 Nov
+2026, newest published date per provider, same four queries:
+
+| Query | ddgs (Bing) | Tavily `topic=news, days=1` |
+|---|---|---|
+| Alaska US Senate election results | 15 Nov | 17 Nov |
+| Alaska Senate race Peltola Sullivan | 17 Nov | 17 Nov |
+| US Senate election results 2026 | 14 Nov | 17 Nov |
+| latest news Jensen Huang Nvidia | 15 Nov | 17 Nov |
+
+ddgs was 0-3 days behind; Tavily was same-day on all four, and it returns a real
+`published_date` plus honours a `days` window. So with a Tavily key present,
+news is served by Tavily and falls back to OnIt's ddgs branch on failure or an
+empty page. Without a key the setting is inert and news stays on ddgs.
+
+Both providers return the same payload shape, so the date sort, the `age`
+labels and the model cap are unchanged whichever one answers.
+
+#### Why apnews.com is not the same source here
+
+Google surfaces AP's **live results project** pages, e.g.
+`https://apnews.com/projects/elections-2026/alaska-us-senate-results`. Those are
+JavaScript applications: the HTML is 142 KB but the visible text is ~3.8 KB and
+contains no candidate names and no tallies, so `fetch_content` on one returns
+boilerplate. AP has not published a new *dated* Alaska article recently, which
+is why no dated news provider — ddgs or Tavily — returns one. ddgs does carry AP
+when the query is site-scoped (`... site:apnews.com` returns 10 AP rows), but
+they are all older than the race's last article.
+
 `ollama_api_key` is deliberately kept out of the spawned servers' environment.
 OnIt's search chain is Tavily → DuckDuckGo and has no Ollama tier, while
 Ollama's web search is metered per call — a forwarded key would be a cost

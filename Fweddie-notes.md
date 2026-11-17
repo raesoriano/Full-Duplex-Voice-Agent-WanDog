@@ -165,6 +165,96 @@ matches the query*, not blindly from the front. Measured on 12 real queries:
 0 empty payloads, and the answer text present in what the model sees 12/12
 (previously 4 of 5 web searches came back empty).
 
+**News freshness** (`mcp_bridge._sort_news`, `_refresh_stale_news`). On 17 Nov
+2026 the agent answered "the latest news is November 12" for the Alaska Senate
+race while Google showed stories from that morning. Nothing was broken in the
+transport: the model was handed a correct, dated, well-formed payload whose
+first two entries were days old. The cause is that `ddgs.news` orders by
+**relevance, not recency**, and the model cap keeps a *prefix* — so the
+prefix decided the answer. The same five-result page measured 17, 12, 17, 14,
+11 Nov, with the two same-day stories sitting third and fifth.
+
+Three fixes, all on Fweddie's side (OnIt's `search` has no `timelimit` and we
+do not edit it):
+
+1. **Over-fetch, then trim.** `_shape_search_args` asks for
+   `MCP_NEWS_OVERFETCH` (10, ddgs' practical ceiling) and records the caller's
+   real number under a private `_news_wanted` key, which `call_tool` strips
+   before the arguments reach the server.
+2. **Sort newest-first, before the cap.** `_sort_news` orders by date and adds
+   an `age` field ("today", "yesterday", "3 days ago") next to `date`. The cap
+   can only keep a prefix, so the prefix has to be the newest.
+3. **Re-ask when stale.** ddgs returns a *different* page for the same query on
+   consecutive calls, so a stale page often means "this draw missed it".
+   `_refresh_stale_news` re-runs the search up to `MCP_NEWS_REFRESH_RETRIES`
+   (2) times when the newest item is not from today, keeps the newest payload
+   (never the last), and gives up at `MCP_NEWS_REFRESH_BUDGET` (4s) — bounded
+   with `wait_for`, because a single ddgs call was measured at 10.5s.
+
+Measured on 10 collected payloads, so ddgs' variance is held constant: mean
+newest-result age 1.40 → 0.80 days, median 2 → 1 days, 5 rows fresher,
+**0 rows worse**. With the refresh enabled, "the model sees a same-day story"
+went from 3/6 to 5/6 over 6 rounds, at a mean 0.8s → 2.2s, hidden behind the
+spoken announcement. `test_news_v2.py` covers all of it offline (11 groups).
+
+### 11b. The news backend, and the cancelled searches
+
+**News never used Tavily.** OnIt's `search(type="news")` branch calls ddgs and
+nothing else — it does not reach the Tavily tier its own *web* branch uses. ddgs'
+news engine is Bing-backed (`ddgs/engines/duckduckgo_news.py`, `provider =
+"bing"`). Same four queries, newest published date, 17 Nov 2026: ddgs returned
+15/17/14/15 Nov where Tavily's news topic returned 17 Nov on all four. So news
+now goes to Tavily first (`MCP_NEWS_BACKEND=tavily`, `topic=news`, `days=1`,
+`advanced`), falling back to OnIt's ddgs branch on failure or an empty page.
+`MCP_NEWS_BACKEND=onit` restores the old path. Both return the same payload
+shape, so the sort, the `age` labels and the cap are untouched.
+
+**Tavily's dates needed parsing.** Tavily stamps `"Tue, 17 Nov 2026 03:44:14
+GMT"`, which `_parse_news_date` did not know. Every Tavily row parsed as `None`,
+so the newest-first sort had nothing to sort on and the `age` labels came out
+empty — silently undoing all of the above. Measured before the fix: 10/10 rows
+unparseable. `test_news_tavily.py` (8 groups) now pins the date shapes, the sort,
+the cap, the backend switch and the echo guard.
+
+**Why searches were being cancelled.** 7 of 62 tool calls in
+`/tmp/fweddie_events.jsonl` were cancelled before returning, all 7 of them a
+`search`, 0.59–4.22s after starting. Five were triggered by the agent's *own*
+spoken announcement: `_ANNOUNCEMENTS["search"]` is `"Searching for that."`, sent
+as a `TTSSpeakFrame`; the mic heard it, the transcript read `"Searching for
+that."` or `"Searching."`, the VAD raised a turn start, and the resulting
+`InterruptionFrame` cancelled the in-flight call. The agent then told the user
+"it looks like that search was cancelled" (idx 2097, 2123).
+
+The pipeline has **no echo cancellation at all** — the v4 AEC (`aec.py`,
+`audio_io.py`, `ECHO_REF_DELAY_MS`, the mic duck) was left behind in the Pipecat
+rewrite, and the repo's history starts after it. The fix here is
+`FunctionCallUserMuteStrategy` as `user_mute_strategies` on
+`LLMUserAggregatorParams`: it suppresses user frames (VAD frames included) for
+exactly the window a function call is in progress, which is where the
+announcement lives, and lifts on `FunctionCallResultFrame` so barge-in on real
+answers is unchanged.
+
+Pipecat already settles a cancelled call itself — `_cancel_function_call_tasks`
+marks the runner `settled` *before* cancelling and the aggregator records
+`"CANCELLED"` — so a handler that reports its own result on the way out is
+rejected with "Ignoring result … already settled". The handler only logs.
+
+**Self-echo during ordinary answers: closed in hardware, not in code.** A
+`bot_started` followed by a `user_started` inside the bot's own utterance
+happened 26% of the time after real answers (vs 15% after announcements), so the
+echo was there too — it just cost a false barge-in rather than a cancelled tool.
+The v4 defence would have been restoring the mic duck while the bot speaks, or
+`pywebrtc_audio.EchoCanceller` (installed but unused).
+
+It was not needed. Moving the speaker away from the mic and lowering both the
+output volume and the mic gain removed the acoustic coupling at the source, and
+the agent now runs without false barge-ins. No AEC code, no mic duck, no extra
+latency. This is the intended state: **do not add `pywebrtc_audio.EchoCanceller`
+or a mic duck for this** — the coupling is gone at the physical layer, and either
+change would spend CPU and complicate barge-in for a problem that no longer
+exists. If the echo ever returns, fix the placement and gain first; treat code
+AEC as the fallback, not the default.
+
 The two env vars `mcp_bridge` sets when spawning the servers are what make the
 safeguards actually fire (without them every ask collapses to a hard deny):
 

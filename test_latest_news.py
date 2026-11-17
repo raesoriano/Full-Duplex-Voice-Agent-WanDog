@@ -95,8 +95,23 @@ def make_search_tool():
     )
 
 
-async def run_tool(server, **kwargs) -> str:
-    """Invoke the bridge's search handler and return what the model would see."""
+async def run_tool(server, backend: str = "onit", **kwargs) -> str:
+    """Invoke the bridge's search handler and return what the model would see.
+
+    ``backend`` defaults to "onit" so these tests keep exercising OnIt's own
+    call path -- the retry in _call_with_search_retry lives there, and a news
+    query with the default "tavily" backend would never reach the fake server
+    at all. The Tavily tier has its own group (see test_news_tavily.py).
+    """
+    _saved = config.MCP_NEWS_BACKEND
+    config.MCP_NEWS_BACKEND = backend
+    try:
+        return await _run_tool_inner(server, **kwargs)
+    finally:
+        config.MCP_NEWS_BACKEND = _saved
+
+
+async def _run_tool_inner(server, **kwargs) -> str:
     bridge = mcp_bridge.ToolBridgeProcessor([server], guard=mcp_bridge.Guard(timeout=1))
     bridge.announce = False
     handler = bridge._make_tool(server, make_search_tool())
@@ -391,7 +406,8 @@ async def main() -> int:
         test_ollama_never_forwarded(),
     ]
     print("\n--- summary ---")
-    print(f"  {sum(results)}/{len(results)} groups passed")
+    passed = sum(1 for r in results if r is True)
+    print(f"  {passed}/{len(results)} groups passed")
     print("\nALL PASSED" if all(results) else "\nFAILURES ABOVE")
     return 0 if all(results) else 1
 

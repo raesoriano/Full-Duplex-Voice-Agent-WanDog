@@ -54,6 +54,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.turns.user_start.vad_user_turn_start_strategy import VADUserTurnStartStrategy
+from pipecat.turns.user_mute.function_call_user_mute_strategy import (
+    FunctionCallUserMuteStrategy,
+)
 from pipecat.turns.user_stop.speech_timeout_user_turn_stop_strategy import (
     SpeechTimeoutUserTurnStopStrategy,
 )
@@ -521,6 +524,26 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
             start=[VADUserTurnStartStrategy()],
             stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=config.TURN_STOP_SECS)],
         ),
+        # Echo guard for the agent's own fixed announcements.
+        #
+        # There is no AEC anywhere in this pipeline (no pywebrtc_audio filter,
+        # no Speex), so the mic hears the speaker. The tool bridge speaks a
+        # fixed line ("Searching for that.") before every tool call, and that
+        # line comes back through the mic as speech: measured in
+        # /tmp/fweddie_events.jsonl, 5 of the 7 cancelled tool calls were
+        # cancelled by the agent's own announcement -- user_partial "Search"
+        # -> user_text "Searching for that." 0.6-1.1s after the tool started,
+        # which raises a VAD turn start, which broadcasts InterruptionFrame,
+        # which cancels the in-flight search. The model then had to say
+        # "it looks like that search was cancelled" (idx 2097, 2123).
+        #
+        # FunctionCallUserMuteStrategy suppresses user frames -- VAD frames
+        # included, they are in the mute list in
+        # llm_response_universal.py:_should_mute -- for exactly as long as a
+        # function call is in progress, which is precisely the window the
+        # announcement occupies. Barge-in on the agent's *answers* is
+        # untouched: the mute lifts on FunctionCallResultFrame.
+        user_mute_strategies=[FunctionCallUserMuteStrategy()],
         # Hard ceiling so a turn can never hang open waiting for text.
         user_turn_stop_timeout=config.TURN_STOP_TIMEOUT_SECS,
     )
