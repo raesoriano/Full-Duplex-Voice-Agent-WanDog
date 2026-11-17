@@ -209,6 +209,7 @@ Run the suite with the venv interpreter; every file is standalone (`python test_
 | `test_turn_context.py` | both aggregators share one `LLMContext`, so answers reach history |
 | `test_stream_asr.py` | streaming partials arrive before speech ends |
 | `test_pipeline_asr.py` | long questions (3.5 s, 5.6 s) still close their turn |
+| `test_vad_shared_state.py` | the VAD gate matches its config — one analyzer per consumer, not one shared (sharing halves every gate) |
 | `test_tool_result.py` | every tool handler settles its call via `result_callback`, including on error and timeout — the regression test for tools that run but are never spoken |
 | `test_tool_parity.py` | the bridge exposes OnIt's full toolset (14 tools), compared against a fixed list |
 | `test_tool_secrets.py` | tool-key resolution: file overrides keychain, deleting the file falls back to the keychain, blanks are omitted, YAML retyping is coerced (offline) |

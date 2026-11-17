@@ -125,15 +125,22 @@ async def run_one(path: str) -> dict | None:
         print(f"SKIP: {path} is not present")
         return None
 
-    vad = SileroVADAnalyzer(
-        sample_rate=PROC_RATE,
-        params=VADParams(
-            confidence=config.VAD_CONFIDENCE,
-            start_secs=config.VAD_START_SECS,
-            stop_secs=config.VAD_STOP_SECS,
-            min_volume=config.VAD_MIN_VOLUME,
-        ),
-    )
+    # One analyzer PER CONSUMER. A VADAnalyzer is stateful; sharing one between
+    # VADProcessor and the aggregator halves every gate (see agent.py). This
+    # harness had the same bug, which is why it never caught it.
+    def _mk_vad() -> SileroVADAnalyzer:
+        return SileroVADAnalyzer(
+            sample_rate=PROC_RATE,
+            params=VADParams(
+                confidence=config.VAD_CONFIDENCE,
+                start_secs=config.VAD_START_SECS,
+                stop_secs=config.VAD_STOP_SECS,
+                min_volume=config.VAD_MIN_VOLUME,
+            ),
+        )
+
+    vad = _mk_vad()
+    agg_vad = _mk_vad()
     stt = SherpaStreamingSTTService(
         model_dir=config.ASR_STREAM_MODEL_DIR,
         num_threads=config.ASR_THREADS,
@@ -147,7 +154,7 @@ async def run_one(path: str) -> dict | None:
     user_agg = LLMUserAggregator(
         LLMContext(messages=[{"role": "system", "content": "test"}]),
         params=LLMUserAggregatorParams(
-            vad_analyzer=vad,
+            vad_analyzer=agg_vad,
             user_turn_strategies=UserTurnStrategies(
                 start=[VADUserTurnStartStrategy()],
                 stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=config.TURN_STOP_SECS)],

@@ -377,7 +377,7 @@ had, which was the previous question.
 - Knobs: `FWEDDIE_ASR_BACKEND`, `FWEDDIE_ASR_FINAL`, `FWEDDIE_ASR_FINAL_MODEL`,
   `FWEDDIE_ASR_PREROLL` (1.0 s kept from before the VAD fires, so the decoder does
   not start mid-word), `FWEDDIE_ASR_THREADS` (2 -- the Pi also runs VAD, the LLM
-  client and Piper), `FWEDDIE_TURN_STOP` (0.6 s speech-timeout).
+  client and Piper), `FWEDDIE_TURN_STOP` (1.0 s speech-timeout).
 - **Rejected:** the 20M zipformer returned empty strings on this mic's audio. The
   2023-06-26 model works on every capture. `WhisperSTTService`'s segmented
   default remains available for A/B.
@@ -491,8 +491,8 @@ appears.
 (Pipecat's default is 5.0). It is an inactivity ceiling, not a transcription
 deadline, and 3.0 s sits right at the length of a spoken question -- a 3.5 s
 question was force-closed 31 ms *before* the VAD stop and landed on the same
-empty-turn path. **Fix:** reverted to 5.0 s, with the 0.6 s
-`SpeechTimeoutUserTurnStopStrategy` doing the real turn closing.
+empty-turn path. **Fix:** reverted to 5.0 s, with the
+`SpeechTimeoutUserTurnStopStrategy` (now 1.0 s) doing the real turn closing.
 
 **Why the tests passed while the live agent failed:** `test_pipeline_asr.py`
 used 1.4 s and 1.8 s clips -- shorter than the 3 s timeout -- never included the
@@ -571,3 +571,73 @@ barge-in even with the wiring. **Fix:** `VAD_MIN_VOLUME` is now a float, default
 - [ ] (Optional) Voice the approval prompt: have Fweddie *say* "I need approval
       to run X" and take the answer by ASR, instead of the dashboard button /
       console. The Guard's `prompt` is a pluggable callback, so it's a drop-in.
+
+---
+
+## The pause that split a sentence: one VAD analyzer, two consumers
+
+**Symptom.** At 19:41:05 the user said "Senate elections." paused, then said
+"as in senators. What is the latest news on the US Senate elections?". The
+agent answered only "Senate elections." and asked for a repeat; "as in
+senators" then arrived attached to the *next* question. Same session, an hour
+earlier, the same shape: "What is the latest news under u s senate elec" was
+closed and "Specifically alaska and dex" opened a new turn.
+
+**The gate was never what the config said.** `agent.py` built ONE
+`SileroVADAnalyzer` and passed that same object to both `VADProcessor` and
+`LLMUserAggregatorParams`. The aggregator builds its own internal
+`VADController` from it, so two controllers called `analyze_audio` on every
+audio frame. A `VADAnalyzer` is stateful: `_run_analyzer` appends to
+`_vad_buffer` and advances `_vad_stopping_count`. Fed twice per frame, each
+32 ms window is counted twice and every gate runs at half its length.
+
+Measured directly (`test_vad_shared_state.py`):
+
+    fed 1x per window -> start 0.180 s, stop 0.710 s   (matches 0.25 / 0.70)
+    fed 2x per window -> start 0.060 s, stop 0.330 s   (exactly half)
+
+So the configured 0.7 s VAD stop behaved as **0.35 s**, and `VAD_START_SECS`
+0.25 behaved as **0.13 s**. The total silence gate was ~0.95 s, not 1.30 s.
+
+This explains two older entries in this file that were written as if they were
+tuning problems: the keyboard clicks that kept starting turns (the 0.25 s
+debounce was really 0.13 s, so a click outlasted it), and the need to raise
+`VAD_CONFIDENCE` to 0.6. Both were symptoms of the halved debounce.
+
+**Why no test caught it.** `test_pipeline_asr.py` had the identical bug -- it
+built one analyzer and passed it to both places -- so it measured the halved
+gate and agreed with the live agent.
+
+**Fix.** Each consumer gets its own analyzer (`_make_vad_analyzer()` called
+twice). Same fix in the harness. `test_vad_shared_state.py` pins it by
+measuring the gate at 1x and 2x feeds, so re-introducing sharing fails the test.
+
+**And the actual ask: raise the pause tolerance a little.** With the gate
+honest again the two knobs are independent and additive:
+
+    silence gate = VAD_STOP_SECS + TURN_STOP_SECS
+
+`TURN_STOP_SECS` went 0.6 -> 1.0. The cost is small because the turn cannot end
+before a transcript arrives and tiny.en lands ~0.91 s after the VAD stop, so
+everything up to ~0.9 s of the timer is free. Measured on a 0.95 s utterance,
+twice each, separate analyzers:
+
+    TURN_STOP   VAD stop -> turn end   silence gate
+      0.6 s          0.94 s              1.30 s
+      1.0 s          1.00 s              1.70 s
+      1.2 s          1.20 s              1.90 s
+      1.6 s          1.60 s              2.30 s
+
+So 0.6 -> 1.0 costs 0.06 s and buys 0.4 s of pause tolerance. Past 1.0 the
+timer becomes the binding constraint and each extra 0.2 s is paid in full,
+which is why it stopped at 1.0.
+
+End-to-end on the incident's own two halves ("Senate elections." / pause /
+"As in senators.") through the real pipeline:
+
+    pause 0.5 s -> 1 turn  "Senate elections. As in senators."
+    pause 0.8 s -> 1 turn  "Senate elections. As in senators."
+    pause 1.0 s -> 1 turn  "Senate elections. As in senators."
+    pause 1.3 s -> 2 turns (still split, as it must be)
+
+Before the fix it split at every pause tested, including 0.5 s.

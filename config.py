@@ -138,6 +138,17 @@ ASR_SAMPLE_RATE = 16000
 # 0.25s requires a sound to last longer than a click before a turn starts.
 VAD_CONFIDENCE = float(os.environ.get("FWEDDIE_VAD_CONFIDENCE", 0.6))
 VAD_START_SECS = float(os.environ.get("FWEDDIE_VAD_START", 0.25))
+# The real silence gate, in combination with TURN_STOP_SECS below.
+#
+# WARNING: until now this value was never actually in force. agent.py handed
+# ONE SileroVADAnalyzer instance to both VADProcessor and the LLM user
+# aggregator, and a VADAnalyzer is stateful: both controllers called
+# ``analyze_audio`` on every frame, so each 32 ms window was counted twice and
+# every gate ran at half its configured length -- 0.7 s behaved as 0.35 s,
+# start_secs 0.25 as 0.13. That is why keyboard clicks kept starting turns
+# (the 0.25 s debounce was really 0.13 s) and why a 0.8 s pause split a
+# sentence. Each consumer now gets its own analyzer, so the number below is
+# the number that runs.
 VAD_STOP_SECS = float(os.environ.get("FWEDDIE_VAD_STOP", 0.7))
 
 # ---------------------------------------------------------------------------
@@ -156,10 +167,28 @@ VAD_STOP_SECS = float(os.environ.get("FWEDDIE_VAD_STOP", 0.7))
 # speech-timeout: end the turn TURN_STOP_SECS after the VAD stop, once a
 # transcript has arrived.
 #
-# 0.6 s is the strategy's own default and is enough to cover "hmm" pauses
-# inside a sentence without feeling laggy. Raise it if you dictate slowly and
-# the agent keeps cutting you off; lower it to 0.4 for snappier replies.
-TURN_STOP_SECS = float(os.environ.get("FWEDDIE_TURN_STOP", 0.6))
+# The turn cannot end before a transcript arrives, so this timer only costs
+# what it exceeds the final pass. Measured on this Pi (one 0.95 s utterance,
+# separate VAD analyzers, twice each, /tmp/t_senate.wav):
+#
+#     TURN_STOP   VAD stop -> turn end     silence gate
+#       0.6 s          0.94 s                1.30 s
+#       1.0 s          1.00 s                1.70 s
+#       1.2 s          1.20 s                1.90 s
+#       1.6 s          1.60 s                2.30 s
+#
+# tiny.en finishes ~0.91 s after the VAD stop, so everything up to ~0.9 s is
+# FREE -- the turn is waiting for the transcript anyway. 0.6 -> 1.0 therefore
+# costs 0.06 s and buys 0.4 s of extra pause tolerance. Past 1.0 the timer
+# becomes the binding constraint and every extra 0.2 s is paid in full.
+#
+# Why not lower, and why this matters: a pause longer than the gate ends the
+# turn, and the words said after it open a NEW turn. Measured in
+# /tmp/fweddie_events.jsonl (19:41:05, "Senate elections." [pause] "as in
+# senators. ..."): the pause split one question into two and the clarifying
+# phrase was answered as if it were a new question. 1.0 s covers an ordinary
+# clause pause without adding perceptible lag.
+TURN_STOP_SECS = float(os.environ.get("FWEDDIE_TURN_STOP", 1.0))
 # Hard ceiling: seconds without ANY user activity before an open turn is
 # closed regardless of what the stop strategy thinks.
 #

@@ -418,15 +418,39 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     # The analyzer must run at the rate of the InputAudioRawFrames it will
     # actually see, which is AFTER the resampler (16 kHz when ASR is on).
     # Silero rejects anything but 8000/16000, so this is not optional.
-    vad_analyzer = SileroVADAnalyzer(
-        sample_rate=proc_rate,
-        params=VADParams(
-            confidence=config.VAD_CONFIDENCE,
-            start_secs=config.VAD_START_SECS,
-            stop_secs=config.VAD_STOP_SECS,
-            min_volume=config.VAD_MIN_VOLUME,
-        ),
-    )
+    #
+    # ONE ANALYZER PER CONSUMER. A VADAnalyzer is stateful -- it accumulates
+    # bytes in ``_vad_buffer`` and advances ``_vad_stopping_count`` inside
+    # ``_run_analyzer``. Handing the SAME instance to both ``VADProcessor``
+    # and ``LLMUserAggregatorParams`` makes both controllers feed it every
+    # audio frame, so each 32 ms window is counted twice and every gate runs
+    # at half its configured value:
+    #
+    #     stop_secs 0.7 -> 11 quiet windows instead of 22 -> 0.35 s
+    #     start_secs 0.25 -> 4 speaking windows instead of 8  -> 0.13 s
+    #
+    # Measured on a two-part utterance ("Senate elections." / pause /
+    # "As in senators.") fed through the real pipeline: shared -> the VAD
+    # reported a stop after 0.33 s of silence and the question was split in
+    # two at every pause tested; separate -> 0.71 s, as configured.
+    #
+    # This is also why ``VAD_STOP_SECS`` "felt" shorter than 0.7 s for the
+    # whole life of this file, and why ``VAD_CONFIDENCE`` had to be pushed to
+    # 0.6 to stop keyboard clicks starting turns: the start debounce was
+    # 0.13 s, not 0.25 s, so a click outlasted it.
+    def _make_vad_analyzer() -> SileroVADAnalyzer:
+        return SileroVADAnalyzer(
+            sample_rate=proc_rate,
+            params=VADParams(
+                confidence=config.VAD_CONFIDENCE,
+                start_secs=config.VAD_START_SECS,
+                stop_secs=config.VAD_STOP_SECS,
+                min_volume=config.VAD_MIN_VOLUME,
+            ),
+        )
+
+    vad_analyzer = _make_vad_analyzer()          # for VADProcessor (downstream)
+    aggregator_vad_analyzer = _make_vad_analyzer()  # for the user aggregator
 
     # --- LLM (OnIt, OpenAI-compatible, raw-audio input) --------------------
     # The clock goes in even without the bridge. Before this, the whole prompt
@@ -510,7 +534,7 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     # work. (Previously it was only created when a tool bridge existed, which
     # disabled barge-in in the default no-tools, ASR-on configuration.)
     user_params = LLMUserAggregatorParams(
-        vad_analyzer=vad_analyzer,
+        vad_analyzer=aggregator_vad_analyzer,
         # VAD-only turn start: the turn (and the barge-in) fires the moment the
         # analyzer hears speech, without waiting for a transcript.
         #
