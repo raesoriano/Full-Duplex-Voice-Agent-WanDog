@@ -858,36 +858,25 @@ unconditional `follow()` never runs. The check that guards this therefore append
 a turn from inside the browser session. The first version of that check appended
 before the browser started and passed against a deliberately broken script.
 
-## The husky icons are scaled from the uploaded drawings
+## The husky icons are three committed PNGs
 
-Two faces, each scaled from a drawing in `assets/`:
+`assets/` holds exactly three files, and they are the assets -- there is no
+source drawing in the tree and no script that rebuilds them:
 
-* `husky-idle2.png` -- mouth open, tongue out. The bar at rest, and the avatar
-  beside every reply.
-* `husky-think3.png` -- muzzle up. The bar while a turn is in flight.
+* `husky-idle.png` -- 192 px, mouth open, tongue out. The bar at rest, and the
+  avatar beside every reply.
+* `husky-think.png` -- 192 px, muzzle up. The bar while a turn is in flight.
+* `husky-32.png` -- 32 px favicon, from the idle drawing.
 
-`tools/make_husky.py` regenerates `husky-idle.png` and `husky-think.png` at
-192 px, and `husky-32.png` (the favicon) at 32 px, from those two. The uploads
-are kept because they are the sources: rebuilding reads them, not the icons.
-
-### A plain resize, with one detail that needs care
-
-The uploads are finished drawings, so this is a Lanczos resize and nothing more
--- no decoding, no tracing, no re-rendering. The earlier version of this script
-decoded a halftone back to its cell grid first; that machinery is gone, because
-these files are not halftones. Downscaling them loses 0.1% of the ink mass at
-192 px and 2.9% at 30 px, which is an ordinary resample, not the 53% loss that
-made the old glyph renders unreadable.
-
-The detail is the alpha channel. Both drawings carry fully transparent pixels
-whose RGB is black, and resampling straight RGBA drags that black into the edge
-of every drawn pixel -- a dark halo around a face that is only ever shown 26-30
-px wide. So the resize premultiplies by alpha, runs Lanczos, then divides the
-alpha back out. Same pixels in the interior, clean edge at the rim.
+An earlier revision also carried the original drawings and a script that
+rescaled them on demand. Both are gone: the icons are used at 26-30 px and never
+re-derived, so the drawings were only ever inputs to one command, and carrying
+two copies of each face meant the tree could disagree with itself about which
+one was current. Redrawing a face now means replacing the PNG in place.
 
 ### Why rasters, and why two-tone
 
-Rasters because the sources are raster, and tracing them to SVG produced blobs
+Rasters because the drawings are raster, and tracing them to SVG produced blobs
 the first time round (the eyes fused with the muzzle). Two-tone because the
 icons sit on both themes: the light backing is what shows on the dark theme, the
 darker drawing is what shows on the light one, and both have to be in the same
@@ -898,15 +887,18 @@ a luminance range, not a fixed ink colour.
 
 `test_dashboard_layout.py` test 4: both icons exist and differ, roughly half the
 square is drawn with a transparent margin on every side, both a light backing
-and a darker drawing are present, and the drawn shape keeps the aspect of its
-upload. The last one is the check that catches a rebuild that forces a square
-box: the uploads are neither square nor alike (the idle drawing is taller than
+and a darker drawing are present, and the drawn shape keeps the aspect it had
+before it was scaled. The last one catches a replacement that forces a square
+box: the two faces are neither square nor alike (the idle drawing is taller than
 it is wide, the thinking one wider than it is tall), so squashing one is easy to
-ship without noticing. The expected aspect is read from the upload, not
-hardcoded, so re-exporting a drawing re-baselines the check.
+ship without noticing.
+
+The expected aspects live in `ASPECT` at the top of that test -- 0.885 for idle,
+1.043 for think -- because the source drawings are no longer in the tree to be
+measured. That is the one number to re-measure if a face is ever redrawn.
 
 The PNGs are inlined as data URIs: there is no static route to `assets/`, and a
-data URI cannot 404 or go stale while an icon is being rebuilt.
+data URI cannot 404 or go stale while an icon is being replaced.
 `assets/husky-32.png` remains the favicon, which Streamlit requires to be raster.
 
 ## The bar's face follows the turn

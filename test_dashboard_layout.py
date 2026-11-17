@@ -34,8 +34,11 @@ import numpy as np  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 ASSETS = Path(__file__).parent / "assets"
-# The uploads the icons are scaled from, per face.
-UPLOADS = {"idle": "husky-idle2.png", "think": "husky-think3.png"}
+# The aspect each drawing had before it was scaled to an icon. The source
+# drawings are no longer in the tree (the icons are the assets now), so these
+# are recorded here rather than read from a file: idle is taller than wide,
+# think wider than tall. Re-measure if a face is ever redrawn.
+ASPECT = {"idle": 0.885, "think": 1.043}
 DASHBOARD = str(Path(__file__).parent / "dashboard.py")
 LOG = Path(os.environ["FWEDDIE_DASHBOARD_LOG"])
 CHROMIUM_PORT = 9455
@@ -149,10 +152,9 @@ def test_icons_are_raster_and_two_tone() -> None:
     theme, and a white face alone is invisible on the light one, so both must be
     in the same file.
 
-    The aspect check is what the uploads bring with them. The two drawings are
-    not square and are not the same shape, so a rebuild that forces a square box
-    squashes one of them; the expected aspect is read from the upload, not
-    hardcoded, so re-exporting a drawing re-baselines it.
+    The aspect check guards against a rebuild that forces a square box: the two
+    drawings are not square and are not the same shape, so squashing one is easy
+    to ship without noticing.
     """
     from PIL import Image
 
@@ -189,21 +191,18 @@ def test_icons_are_raster_and_two_tone() -> None:
         # read as off-centre in a circle.
         assert not opaque[0].any() and not opaque[-1].any(), f"{name}: no top/bottom margin"
 
-        # Aspect: the drawing must keep the shape its upload has, not a square
-        # one. The uploads are neither square nor alike, so a rebuild that forces
-        # a square box squashes one of them. The expected aspect is read from the
-        # upload, so re-exporting a drawing re-baselines the check.
+        # Aspect: the drawing must keep the shape its source had, not a
+        # square one. The two faces are neither square nor alike, so a
+        # rebuild that forces a square box squashes one of them.
         ys, xs = np.nonzero(opaque)
         got = (xs.max() - xs.min() + 1) / (ys.max() - ys.min() + 1)
-        src = np.asarray(Image.open(ASSETS / UPLOADS[name]).convert("RGBA")).astype(float)
-        ys2, xs2 = np.nonzero(src[..., 3] > 128)
-        want = (xs2.max() - xs2.min() + 1) / (ys2.max() - ys2.min() + 1)
+        want = ASPECT[name]
         assert abs(got - want) / want < 0.05, (
-            f"{name}: icon aspect {got:.3f} but the upload is {want:.3f} "
+            f"{name}: icon aspect {got:.3f} but the drawing is {want:.3f} "
             f"-- the drawing was squashed into a square box"
         )
     print("4. both faces are raster, differ, two-tone            OK")
-    print("   ...and keep their upload's aspect, not a square one  OK")
+    print("   ...and keep their drawing aspect, not a square    OK")
 
 
 # ---------------------------------------------------------------------------

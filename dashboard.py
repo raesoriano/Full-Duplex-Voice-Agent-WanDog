@@ -74,12 +74,13 @@ STOP_FILE = Path(config.DASHBOARD_STOP_FILE)
 CLEAR_FILE = Path(config.DASHBOARD_CLEAR_FILE)
 
 ASSETS = Path(__file__).parent / "assets"
-# Two faces, both scaled from the drawings in assets/ by tools/make_husky.py:
+# The three icons in assets/, committed as-is:
 #   husky-idle  -- mouth open, tongue out. The bar's resting state, and the
 #                  avatar beside every reply.
 #   husky-think -- muzzle up. The bar's face while a turn is in flight.
-# Rasters, not SVG: the drawings are raster, and tracing them to SVG produced
-# blobs (see tools/make_husky.py).
+#   husky-32    -- the favicon.
+# Rasters, not SVG: tracing the drawings produced blobs (the eyes fused with the
+# muzzle). See "The husky icons are three committed PNGs" in Fweddie-notes.md.
 HUSKY_IDLE_PNG = ASSETS / "husky-idle.png"
 HUSKY_THINK_PNG = ASSETS / "husky-think.png"
 
