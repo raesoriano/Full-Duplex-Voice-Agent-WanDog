@@ -74,7 +74,8 @@ STOP_FILE = Path(config.DASHBOARD_STOP_FILE)
 CLEAR_FILE = Path(config.DASHBOARD_CLEAR_FILE)
 
 ASSETS = Path(__file__).parent / "assets"
-HUSKY = ASSETS / "husky.png"
+HUSKY_SVG = ASSETS / "husky.svg"
+HUSKY_PNG = ASSETS / "husky.png"
 
 st.set_page_config(
     page_title="Fweddie",
@@ -198,20 +199,64 @@ html, body, .stApp,
     color: var(--fw-text) !important;
     font-family: var(--fw-font) !important;
 }
-header[data-testid="stHeader"] { background: transparent !important; }
+/* Streamlit's own header is an overlay: `position:absolute; top:0; height:60px;
+   z-index:999990` (measured), and it sits ON TOP of the page -- elementFromPoint
+   at y=20 returned it, so it would swallow clicks on a top bar placed there. It
+   is emptied by our own CSS anyway, so it is removed from the layout and the
+   page's own bar takes the top of the screen. */
+header[data-testid="stHeader"] { display: none !important; }
 [data-testid="stToolbar"], [data-testid="stAppDeployButton"] { display: none !important; }
 #MainMenu, footer { visibility: hidden; }
 
+/* The page does not scroll; the transcript does.
+   -------------------------------------------------
+   Measured before this change: [data-testid="stMain"] is the scroller
+   (overflow-y:auto, clientHeight 657, scrollHeight 936), and the composer is
+   pinned over the bottom of it with a background gradient. That is why the
+   scrollbar "disappeared" at the end of the conversation: the thumb's travel
+   runs to the bottom of stMain, and the last ~82 px of that travel is behind the
+   composer's gradient, which fades it out. The thumb was still there -- the last
+   6 px column of a screenshot showed it fading from rgb(115,115,111) at y=575 to
+   rgb(38,38,36) at y=606 -- it had simply been painted over.
+
+   The fix is to give the transcript a scroller of its own that ends ABOVE the
+   composer, so the thumb's travel is never under it. */
 .block-container {
-    padding-top: 1.1rem;
-    padding-bottom: 8rem;   /* room for the pinned composer */
+    /* No vertical padding: the transcript carries its own margin below the bar
+       (see .st-key-transcript), so the gap is one measured number rather than a
+       padding here plus an unknown block gap inside. Padding it here left 60 px
+       of dead space between the bar and the first message. */
+    padding-top: 0;
+    padding-bottom: 0;
     max-width: 820px;
 }
 
-/* --- header ----------------------------------------------------------- */
+/* --- top bar ---------------------------------------------------------- */
+/* Identity on the left, controls on the right, and it stays put: `position:
+   fixed` rather than `sticky` because the page itself no longer scrolls, so
+   there is nothing for a sticky element to stick to. The keyed container
+   (.st-key-topbar) is ours; the bar's own background is opaque so the
+   transcript scrolls UNDER it rather than through it. */
+.st-key-topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+    padding: .55rem 1rem .6rem 1rem;
+    background: var(--fw-bg);
+    border-bottom: 1px solid var(--fw-border);
+}
+.st-key-topbar > div { max-width: 820px; margin: 0 auto; }
+/* The status caption is the last thing in the bar. Tighter than Streamlit's
+   default caption spacing, and its own colour, because it is metadata. */
+.st-key-topbar [data-testid="stCaptionContainer"] {
+    margin: .1rem 0 0 0; padding: 0; font-size: .68rem;
+}
+.st-key-topbar [data-testid="stCaptionContainer"] p { margin: 0; }
+/* No gap between the two columns: the identity block and the buttons are one
+   row, and Streamlit's default column gap would push the buttons inwards. */
+.st-key-topbar [data-testid="stHorizontalBlock"] { gap: .2rem; align-items: center; }
+
 .fw-head {
     display: flex; align-items: center; gap: .6rem;
-    margin: 0 0 1.2rem 0;
+    margin: 0;
 }
 .fw-head img { width: 30px; height: 30px; display: block; border-radius: 50%; }
 .fw-head .fw-name { font-size: 1.02rem; font-weight: 600; letter-spacing: .01em; }
@@ -232,6 +277,43 @@ header[data-testid="stHeader"] { background: transparent !important; }
     background: var(--fw-hover); border-color: var(--fw-border);
     color: var(--fw-text);
 }
+
+/* --- transcript scroller ---------------------------------------------- */
+/* The transcript is its own scroll box, sized to end above the composer, so a)
+   the thumb never travels behind the composer's gradient (which is what made it
+   look like the scrollbar vanished), and b) opening the page can put the view at
+   the newest message without scrolling the whole document.
+
+   st.fragment renders into .st-key-transcript, and Streamlit's own inner
+   vertical block is the box that scrolls.
+
+   The height is NOT a hard-coded rem subtraction. It was, and it kept being
+   wrong: the bar's height depends on whether the status line is present, on the
+   theme's line heights and on Streamlit's own block padding, so every attempt to
+   guess it in rem left the transcript either under the composer or floating
+   above it (measured 607 px bottom against a composer at 575, i.e. 32 px of the
+   transcript hidden behind it). A one-line script in the bar measures the two
+   real edges and sets --fw-scroll-h on :root; the CSS falls back to a viewport
+   calculation only until that script has run. */
+.st-key-transcript {
+    /* Both height and max-height: Streamlit's chain of column flex containers
+       gives this block flex-grow:1, so `height` alone is a basis the box grows
+       past. max-height is the one that actually caps it (measured: height
+       calc(-11.1rem + 100vh) = 479 px, used height 631 px, until max-height was
+       set as well). */
+    margin-top: var(--fw-top-pad, 7.4rem);
+    height: var(--fw-scroll-h, calc(100vh - 13.5rem));
+    max-height: var(--fw-scroll-h, calc(100vh - 13.5rem));
+    overflow-y: auto;
+    overflow-x: hidden;
+    /* A gutter on the right only, so showing/hiding the scrollbar cannot shift
+       the text sideways by half a line. */
+    scrollbar-gutter: stable;
+    padding-right: .3rem;
+}
+/* Keep the newest message clear of the composer even when the view is at the
+   very bottom of the scroll. */
+.st-key-transcript [data-testid="stVerticalBlock"] > div:last-child { padding-bottom: .4rem; }
 
 /* --- messages --------------------------------------------------------- */
 /* The transcript is rendered as plain blocks rather than st.chat_message: that
@@ -360,7 +442,7 @@ header[data-testid="stHeader"] { background: transparent !important; }
 /* The theme-sync iframe: its only job is to run one line of JavaScript, so it
    must take no space. It cannot be height:0 (st.iframe rejects that), hence a
    1 px frame removed from the flow here. */
-.st-key-themesync { display: none !important; }
+.st-key-themesync, .st-key-autoscrollsync { display: none !important; }
 """
 
 _CSS = (
@@ -576,11 +658,19 @@ def turn_in_flight(events: list) -> bool:
 # Header: identity, theme toggle, clear history
 # ---------------------------------------------------------------------------
 
+# The icon is inline SVG rather than a PNG, for two reasons: it stays sharp at
+# any zoom or device pixel ratio, and its colours come from the file itself, so
+# the two-tone (white face, dark outline and markings) works on both palettes
+# without a second asset. The PNGs in assets/ are only the favicon, which has to
+# be raster.
 husky_uri = ""
-if HUSKY.exists():
+if HUSKY_SVG.exists():
     import base64
 
-    husky_uri = "data:image/png;base64," + base64.b64encode(HUSKY.read_bytes()).decode()
+    husky_uri = (
+        "data:image/svg+xml;base64,"
+        + base64.b64encode(HUSKY_SVG.read_bytes()).decode()
+    )
 
 events = read_events()
 session = next((e for e in reversed(events) if e.get("kind") == "session_start"), None)
@@ -595,44 +685,64 @@ if session:
         subtitle = " \u00b7 ".join(bits)
 
 
-h_name, h_theme, h_clear = st.columns([8.4, 0.8, 0.8], vertical_alignment="center")
+# One container keyed "topbar", fixed to the top of the viewport by the CSS
+# above. Identity on the left, the two controls on the right, so the bar keeps
+# its shape whether or not a session is running.
+with st.container(key="topbar"):
+    h_name, h_theme, h_clear = st.columns([8.4, 0.8, 0.8], vertical_alignment="center")
 
-with h_name:
-    st.markdown(
-        f"""<div class="fw-head">
-          <img src="{husky_uri}" alt="" />
-          <div>
-            <div class="fw-name">Fweddie</div>
-            <div class="fw-sub">{subtitle}</div>
-          </div>
-        </div>""",
-        unsafe_allow_html=True,
-    )
+    with h_name:
+        st.markdown(
+            f"""<div class="fw-head">
+              <img src="{husky_uri}" alt="" />
+              <div>
+                <div class="fw-name">Fweddie</div>
+                <div class="fw-sub">{subtitle}</div>
+              </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
 
-with h_theme:
-    # The glyph is the theme you would switch TO, which is the OnIt convention:
-    # its stylesheet hides the sun in light mode and the moon in dark.
-    with st.container(key="themebtn"):
-        if st.button(
-            "",
-            key="themebtn_btn",
-            icon=":material/dark_mode:" if theme == "light" else ":material/light_mode:",
-            help="Switch to light theme" if theme == "dark" else "Switch to dark theme",
-        ):
-            ss["theme"] = "light" if theme == "dark" else "dark"
-            st.query_params["theme"] = ss["theme"]
-            st.rerun()
+    with h_theme:
+        # The glyph is the theme you would switch TO, which is the OnIt
+        # convention: its stylesheet hides the sun in light mode and the moon in
+        # dark.
+        with st.container(key="themebtn"):
+            if st.button(
+                "",
+                key="themebtn_btn",
+                icon=":material/dark_mode:" if theme == "light" else ":material/light_mode:",
+                help="Switch to light theme" if theme == "dark" else "Switch to dark theme",
+            ):
+                ss["theme"] = "light" if theme == "dark" else "dark"
+                st.query_params["theme"] = ss["theme"]
+                st.rerun()
 
-with h_clear:
-    with st.container(key="clearbtn"):
-        if st.button(
-            "",
-            key="clearbtn_btn",
-            icon=":material/delete_sweep:",
-            help="Clear chat history (also clears the model's memory of it)",
-        ):
-            request_clear()
-            st.rerun()
+    with h_clear:
+        with st.container(key="clearbtn"):
+            if st.button(
+                "",
+                key="clearbtn_btn",
+                icon=":material/delete_sweep:",
+                help="Clear chat history (also clears the model's memory of it)",
+            ):
+                request_clear()
+                st.rerun()
+
+    # Status line: event count, the time of the newest event, and the log path.
+    # Kept minimal on purpose -- this is a chat window, not a debug console -- but
+    # the path is here because "the dashboard is up but shows nothing" is almost
+    # always a log-path mismatch between the two processes.
+    #
+    # It lives in the fixed bar rather than under the transcript so it can never
+    # push the transcript's bottom edge down (the transcript's height is a
+    # viewport calculation) and can never scroll out of sight.
+    tail = read_events(limit=5)
+    if tail:
+        st.caption(
+            f"{len(read_events())} events \u00b7 {fmt_time(tail[-1].get('ts'))} \u00b7 "
+            f"`{LOG_PATH}`"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -809,7 +919,104 @@ def transcript() -> None:
         render_event(ev)
 
 
-transcript()
+# The transcript scrolls itself (see the CSS note), so the fragment needs no
+# anchor. It only has to be the thing that owns the scroll box, which is what
+# gives us .st-key-transcript to size.
+with st.container(key="transcript"):
+    transcript()
+
+
+# --- layout sync: transcript height, and open at the newest message ------
+# Two jobs, one script, because they share the same trigger: a DOM change.
+#
+# 1. HEIGHT. The transcript's scroll box has to end just above the composer. A
+#    hard-coded rem subtraction could not do that reliably -- the bar's height
+#    depends on whether the status line is present, and Streamlit's own block
+#    padding is in em -- so it is measured here instead: the bar's bottom edge and
+#    the composer's top edge are real numbers, and the difference is published as
+#    --fw-scroll-h. Measured before this: transcript bottom 607 px against a
+#    composer at 575, i.e. 32 px of conversation permanently hidden behind the
+#    composer's gradient.
+#
+# 2. SCROLL POSITION. Streamlit starts an overflow box at scrollTop 0, so a
+#    returning reader landed at the OLDEST message. The rule is: follow the bottom
+#    only while the reader is already at the bottom, and stop as soon as they
+#    scroll up, so reading back is never yanked away every second the transcript
+#    fragment re-runs.
+#
+# Both live in the PARENT document, installed once and guarded by a flag. A script
+# inside the 1 px iframe would re-run on every fragment rerun and could not share
+# state between runs -- and it could not observe the parent's DOM at all, which is
+# what the height measurement needs.
+_AUTOSCROLL_JS = """
+<script>
+(function () {
+  var W = window.parent, D = W.document;
+  if (W.__fwLayout) return;
+  W.__fwLayout = true;
+
+  function box() { return D.querySelector('.st-key-transcript'); }
+  function bar() { return D.querySelector('.st-key-topbar'); }
+  function composer() { return D.querySelector('.st-key-composer'); }
+
+  function fit() {
+    var t = box(), b = bar(), c = composer();
+    if (!t || !b) return;
+    var root = D.documentElement.style;
+    var barBottom = b.getBoundingClientRect().bottom;
+    var lower = c ? c.getBoundingClientRect().top : W.innerHeight;
+
+    // Where the transcript would sit with NO margin of ours. Streamlit places the
+    // block a little way down on its own (48 px here), so the margin has to be
+    // "the distance I want" MINUS that offset -- setting it to the distance itself
+    // left 60 px of dead space under the bar. Reading the applied margin back and
+    // subtracting it is self-correcting, and idempotent: once the margin is right,
+    // the next run computes the same number.
+    var applied = parseFloat(W.getComputedStyle(t).marginTop) || 0;
+    var natural = t.getBoundingClientRect().top - applied;
+    var want = barBottom + 12;
+    root.setProperty('--fw-top-pad', Math.max(0, Math.round(want - natural)) + 'px');
+
+    // Height is measured to the composer's upper edge, so the transcript's last
+    // line is never behind the composer's gradient.
+    root.setProperty('--fw-scroll-h',
+                     Math.max(120, Math.round(lower - want - 12)) + 'px');
+  }
+
+  function atBottom(el) {
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  }
+
+  function follow() {
+    var el = box();
+    if (!el) return;
+    if (el.__fwFollow === undefined) el.__fwFollow = true;  // first sight: start at the end
+    if (el.__fwFollow) el.scrollTop = el.scrollHeight;
+  }
+
+  function sync() { fit(); follow(); }
+
+  // A reader who scrolls up stops the follow; scrolling back down resumes it.
+  // The flag lives on the element, so a re-render that replaces the box starts at
+  // the bottom again.
+  D.addEventListener('scroll', function (ev) {
+    var el = box();
+    if (el && ev.target === el) el.__fwFollow = atBottom(el);
+  }, true);
+
+  // MutationObserver rather than an interval: it also fires when a tool result or
+  // a reply grows the box, which is exactly when the height needs recomputing.
+  new W.MutationObserver(sync).observe(D.body, {
+    childList: true, subtree: true, characterData: true
+  });
+  W.addEventListener('resize', sync);
+  W.addEventListener('load', sync);
+  sync();
+})();
+</script>
+"""
+with st.container(key="autoscrollsync"):
+    st.iframe(_AUTOSCROLL_JS, height=1)
 
 
 # ---------------------------------------------------------------------------
@@ -953,14 +1160,4 @@ if ss["mic_on"]:
 # ---------------------------------------------------------------------------
 # Status line
 # ---------------------------------------------------------------------------
-# Kept minimal on purpose: this is a chat window, not a debug console. The paths
-# are here because "the dashboard is up but shows nothing" is almost always a
-# log-path mismatch between the two processes, and that is worth being able to
-# see at a glance.
-
-tail = read_events(limit=5)
-if tail:
-    st.caption(
-        f"{len(read_events())} events \u00b7 {fmt_time(tail[-1].get('ts'))} \u00b7 "
-        f"`{LOG_PATH}`"
-    )
+# (The status line itself is rendered inside the top bar, above.)

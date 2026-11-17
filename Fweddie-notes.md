@@ -799,3 +799,108 @@ conversation back. Both halves are pinned by tests.
 
 Measured end to end in the browser: 4 transcript rows -> 0 rows on click, and
 `events.jsonl.clear.json` written.
+
+# Dashboard v3: a sticky bar, a measured transcript, and a husky drawn here
+
+Same branch. Four changes, three of which were wrong in a way that looked right
+until it was measured.
+
+## The scrollbar never disappeared -- it was painted over
+
+The complaint was that the scrollbar vanishes at the end of the conversation.
+It does not vanish; it fades. Streamlit's scroller is `[data-testid="stMain"]`
+(measured: `overflow-y:auto`, `clientHeight` 657, `scrollHeight` 936) and the
+composer is pinned over the bottom of it with a gradient. A screenshot of the
+last 6 px column at the bottom of the scroll:
+
+    y=575  rgb(115,115,111)     <- thumb, opaque
+    y=590  rgb( 76, 76, 73)
+    y=606  rgb( 38, 38, 36)     <- page background, thumb gone
+
+So the thumb's travel ran under the composer's `linear-gradient(to top, bg 62%,
+transparent)`. The fix is structural: the transcript gets its own scroll box
+that ENDS above the composer, so its thumb is never under the gradient. The page
+itself no longer scrolls at all (`documentElement.scrollHeight == clientHeight`,
+one scroll box instead of two).
+
+## The transcript's height is measured, not guessed
+
+Four attempts at `calc(100vh - Nrem)` were all wrong, for reasons that are not
+visible in the source: the bar's height depends on whether the status line is
+present, Streamlit's block padding is in `em`, and the container has
+`flex-grow:1`, so `height` alone is a basis the box grows past (measured: height
+`calc(-11.1rem + 100vh)` = 479 px, used height 631 px, until `max-height` was set
+too). The measured failures:
+
+    11.1rem -> transcript bottom 718, composer at 575   (143 px hidden)
+    11.6rem -> bottom 639                              ( 64 px hidden)
+    13.5rem -> bottom 607                              ( 32 px hidden)
+
+Now a one-line script in the bar measures the bar's lower edge and the
+composer's upper edge and publishes `--fw-scroll-h`. Final geometry, measured:
+bar 0-90, transcript 102-563, composer 575-. The margin is computed as "distance
+wanted MINUS the offset Streamlit already applies" (48 px here), read back from
+the applied margin so it is idempotent -- setting it to the distance itself left
+60 px of dead space under the bar.
+
+## Opening at the newest message
+
+Streamlit starts an overflow box at `scrollTop 0`, so a returning reader landed at
+the oldest message. The rule is: follow the bottom only while the reader is
+already at the bottom (40 px tolerance), and stop the moment they scroll up. The
+script lives in the PARENT document, installed once behind a flag, driven by a
+MutationObserver -- not inside the 1 px iframe, which re-runs on every fragment
+rerun and cannot share state.
+
+A trap worth recording: an idle page produces NO mutation. The fragment re-runs
+every second, but with an unchanged log it renders identical markup, so even an
+unconditional `follow()` never runs. The check that guards this therefore appends
+a turn from inside the browser session. The first version of that check appended
+before the browser started and passed against a deliberately broken script.
+
+## The husky icon is drawn here
+
+The reference was a stock husky-head vector; this is an original front view, so
+there is no licence to track. Two things make it work on both palettes:
+
+* the silhouette is WHITE with a dark outline. On the dark theme the white face
+  carries the shape; on the light theme the dark outline does (`#ffffff` on
+  `#faf9f5` is 1.06:1, i.e. invisible on its own);
+* every husky marking is DARK and sits INSIDE the white face -- the goggles, the
+  ear insets, the nose -- so it always has white behind it.
+
+The avatar now uses the SVG (inline data URI) rather than the PNG, which stays
+only as the favicon. `tools/make_icons.py` regenerates the PNGs from the SVG.
+
+One silent failure, worth the guard it now has: the first version put a double
+hyphen inside an XML comment, which is illegal. The file did not parse and the
+browser rendered NOTHING -- no error, no placeholder, just a gap. The test parses
+the file with ElementTree for exactly that reason.
+
+## The bar
+
+`.st-key-topbar` is `position:fixed`, not `sticky`: the page no longer scrolls, so
+there is nothing for a sticky element to stick to. Streamlit's own header had to
+go (`display:none`), because it is an overlay -- `position:absolute; top:0;
+height:60px; z-index:999990` -- and `elementFromPoint(300, 20)` returned it, so it
+would have swallowed clicks on anything placed at the top of the page.
+
+Verified by clicking, not by reading: real mouse events at the buttons' own
+coordinates flipped the palette `dark -> light` (`rgb(38,38,36)` ->
+`rgb(250,249,245)`) and took the transcript from 4 rows to 0.
+
+## Tests
+
+`test_dashboard_layout.py`, 7 checks: 4 through AppTest, 3 against a live server
+the test starts itself (on its own port, reading its own log -- driving whatever
+server happens to be running meant appending to a log the server did not read,
+which is how one check passed by testing nothing).
+
+Every check was confirmed able to fail, by sabotaging the code it protects:
+
+    unconditional follow   -> "the view jumped to 2926 while the reader was scrolled up"
+    bar in the page flow   -> "the bar is static, not fixed"
+    no measured height     -> "the transcript ends at 3186, below the composer at 575"
+
+`test_pipeline_asr.py` still fails its 2.5 s budget (5.83 s here). Pre-existing and
+unrelated: stashing this change and re-running gives 6.06 s.
