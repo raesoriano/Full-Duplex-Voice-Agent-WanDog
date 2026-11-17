@@ -159,10 +159,12 @@ class DashboardControlWatcher(FrameProcessor):
     """
 
     def __init__(self, typed_path: str, stop_path: str, bus=None,
-                 poll_secs: float = 0.2, **kwargs):
+                 poll_secs: float = 0.2, clear_path: str | None = None,
+                 **kwargs):
         super().__init__(**kwargs)
         self._typed_path = Path(typed_path)
         self._stop_path = Path(stop_path)
+        self._clear_path = Path(clear_path) if clear_path else None
         self._bus = bus
         self._poll = poll_secs
         self._task: asyncio.Task | None = None
@@ -170,6 +172,7 @@ class DashboardControlWatcher(FrameProcessor):
         # a racing writer) still cannot be answered twice.
         self._last_typed_id = None
         self._last_stop_id = None
+        self._last_clear_id = None
 
     # -- file plumbing -----------------------------------------------------
 
@@ -239,6 +242,26 @@ class DashboardControlWatcher(FrameProcessor):
         # TTS's interruptible audio contexts, so the bot goes quiet mid-word.
         await self.broadcast_interruption()
 
+    async def _handle_clear(self, payload: dict) -> None:
+        clear_id = payload.get("id")
+        if clear_id is not None and clear_id == self._last_clear_id:
+            return
+        self._last_clear_id = clear_id
+
+        logger.info(" clear history requested from the dashboard")
+        # Stop whatever is being said first. Clearing the context of a turn that
+        # is still generating would let the in-flight reply finish and then be
+        # written back into the freshly emptied context by the assistant
+        # aggregator -- the conversation would reappear one turn at a time.
+        await self.broadcast_interruption()
+        # LLMMessagesUpdateFrame with an empty list and run_llm=False: the model
+        # forgets the conversation, and no new inference is started. Clearing is
+        # not a question, so it must not produce an answer.
+        from pipecat.frames.frames import LLMMessagesUpdateFrame
+        await self.queue_frame(LLMMessagesUpdateFrame(messages=[], run_llm=False))
+        if self._bus is not None:
+            await self._bus.emit("cleared")
+
     async def _watch(self):
         while True:
             typed = self._take(self._typed_path)
@@ -247,6 +270,10 @@ class DashboardControlWatcher(FrameProcessor):
             stop = self._take(self._stop_path)
             if stop is not None:
                 await self._handle_stop(stop)
+            if self._clear_path is not None:
+                clear = self._take(self._clear_path)
+                if clear is not None:
+                    await self._handle_clear(clear)
             await asyncio.sleep(self._poll)
 
     # -- pipeline ----------------------------------------------------------
@@ -801,6 +828,7 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         config.DASHBOARD_STOP_FILE,
         bus=bus,
         poll_secs=config.DASHBOARD_CONTROL_POLL_SECS,
+        clear_path=config.DASHBOARD_CLEAR_FILE,
     ))
     stages.append(user_agg)
     stages.append(llm)

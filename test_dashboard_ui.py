@@ -7,6 +7,7 @@ rendered. That makes the file-level contract checkable end to end:
     Send  -> <log>.typed.json exists with the typed text, and the box is empty
     Stop  -> <log>.stop.json exists
     mic   -> <log>.mic_control.json exists with the new state
+    Clear -> <log>.clear.json exists, and the transcript is empty immediately
 
 It also pins the Send/Stop swap: the button must be Send when no turn is in
 flight and Stop when one is, because that is what makes interruption possible
@@ -36,6 +37,7 @@ STOP = Path(str(LOG) + ".stop.json")
 # typed/stop files (see the note in config.py), and guessing cost a debug cycle.
 import config  # noqa: E402
 MIC = Path(config.DASHBOARD_MIC_FILE)
+CLEAR = Path(config.DASHBOARD_CLEAR_FILE)
 
 
 def _seed(*events: dict) -> None:
@@ -170,6 +172,118 @@ def test_transcript_renders_without_markup_leak() -> None:
     print("8. transcript escapes model text                   OK")
 
 
+def test_clear_writes_file_and_empties_the_view() -> None:
+    """Clear must do both halves at once.
+
+    The agent's side is the control file (the model forgets the conversation).
+    The page's side is the transcript going blank in the SAME run -- the file
+    cannot be observed by the browser, so waiting for the agent's ``cleared``
+    event would leave the button looking dead for a poll interval. Both are
+    asserted here because either one alone is a half-working button.
+    """
+    _seed(
+        {"kind": "session_start", "ts": time.time() - 60},
+        {"kind": "user_text", "text": "first question", "ts": time.time() - 50},
+        {"kind": "bot_text", "text": "first answer", "ts": time.time() - 49},
+        {"kind": "bot_stopped", "ts": time.time() - 48},
+    )
+    CLEAR.unlink(missing_ok=True)
+    at = AppTest.from_file(DASHBOARD, default_timeout=60).run()
+    assert not list(at.exception), list(at.exception)
+    assert "clearbtn_btn" in _keys(at), _keys(at)
+
+    blob = "\n".join(m.value for m in at.markdown)
+    assert "first question" in blob, "the seeded conversation did not render"
+
+    at.button(key="clearbtn_btn").click().run()
+    assert not list(at.exception), list(at.exception)
+
+    assert CLEAR.exists(), "Clear did not write the clear file"
+    payload = json.loads(CLEAR.read_text(encoding="utf-8"))
+    assert payload.get("id"), payload
+    assert payload.get("ts"), payload
+
+    blob = "\n".join(m.value for m in at.markdown)
+    assert "first question" not in blob, "the conversation is still on screen after Clear"
+    assert "first answer" not in blob, "the reply is still on screen after Clear"
+    print("9. Clear writes the file and empties the view    OK")
+
+
+def test_clear_survives_a_reload() -> None:
+    """A reload must not bring the cleared conversation back.
+
+    The page's own marker lives in session_state, which a fresh session does
+    not have -- so the only thing that can hold the history down across a
+    reload is the agent's ``cleared`` event in the log. Without it, Clear would
+    appear to work and then undo itself on the next refresh.
+    """
+    now = time.time()
+    _seed(
+        {"kind": "session_start", "ts": now - 60},
+        {"kind": "user_text", "text": "forgotten question", "ts": now - 50},
+        {"kind": "bot_text", "text": "forgotten answer", "ts": now - 49},
+        {"kind": "bot_stopped", "ts": now - 48},
+        {"kind": "cleared", "ts": now - 10},
+    )
+    at = AppTest.from_file(DASHBOARD, default_timeout=60).run()
+    assert not list(at.exception), list(at.exception)
+    blob = "\n".join(m.value for m in at.markdown)
+    assert "forgotten question" not in blob, "history came back after a reload"
+    assert "forgotten answer" not in blob, "the reply came back after a reload"
+    print("10. cleared history stays cleared across a reload  OK")
+
+
+def test_theme_toggle_switches_and_persists() -> None:
+    """The theme must change in the page AND survive a reload.
+
+    Streamlit's own theme cannot be changed from a running script (measured:
+    st._config.set_option("theme.base") left the page at rgb(10,10,10) through
+    both a click and a reload), so the dashboard emits its palette as CSS
+    variables and carries the choice in the URL. This pins both halves: the
+    palette really changes, and the choice is readable on the next run.
+    """
+    _seed({"kind": "session_start", "ts": time.time()})
+    at = AppTest.from_file(DASHBOARD, default_timeout=60).run()
+    assert not list(at.exception), list(at.exception)
+    assert at.session_state["theme"] == "dark", at.session_state["theme"]
+
+    # The dark palette is the one on :root; the light one is not.
+    blob = "\n".join(m.value for m in at.markdown)
+    assert "--fw-bg: #262624" in blob, "the dark palette was not emitted"
+    assert at.button(key="themebtn_btn").icon == ":material/light_mode:", (
+        at.button(key="themebtn_btn").icon
+    )
+
+    at.button(key="themebtn_btn").click().run()
+    assert not list(at.exception), list(at.exception)
+    assert at.session_state["theme"] == "light", at.session_state["theme"]
+    assert at.query_params.get("theme") == "light", dict(at.query_params)
+
+    blob = "\n".join(m.value for m in at.markdown)
+    assert "--fw-bg: #faf9f5" in blob, "the light palette was not emitted"
+    assert at.button(key="themebtn_btn").icon == ":material/dark_mode:", (
+        at.button(key="themebtn_btn").icon
+    )
+    print("11. theme toggles both palettes and the glyph    OK")
+
+
+def test_mic_glyph_is_a_material_icon() -> None:
+    """The mic must be a Material icon, not an emoji.
+
+    An emoji is drawn by the font in its own colours, so a CSS colour on the
+    button cannot reach it -- the blue "listening" state would have been
+    impossible. The Material glyph inherits `color`, which is what the live
+    rule relies on.
+    """
+    _seed({"kind": "session_start", "ts": time.time()})
+    at = AppTest.from_file(DASHBOARD, default_timeout=60).run()
+    assert not list(at.exception), list(at.exception)
+    btn = [b for b in at.button if b.key == "micbtn_btn"][0]
+    assert btn.icon == ":material/mic:", btn.icon
+    assert btn.label == "", f"the mic still has a text label: {btn.label!r}"
+    print("12. mic is a tintable Material icon              OK")
+
+
 def main() -> int:
     tests = [
         test_send_writes_typed_and_clears_box,
@@ -180,6 +294,10 @@ def main() -> int:
         test_mic_toggle_writes_state,
         test_placeholders_are_disabled,
         test_transcript_renders_without_markup_leak,
+        test_clear_writes_file_and_empties_the_view,
+        test_clear_survives_a_reload,
+        test_theme_toggle_switches_and_persists,
+        test_mic_glyph_is_a_material_icon,
     ]
     failed = 0
     for t in tests:

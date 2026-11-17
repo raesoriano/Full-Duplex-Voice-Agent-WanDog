@@ -1,16 +1,26 @@
-# Streamlit theme for the Fweddie dashboard.
+# Streamlit settings for the Fweddie dashboard.
 #
-# The dashboard is deliberately dark, to sit alongside the Ollama chat UI it is
-# modelled on. Setting the palette here (rather than only in injected CSS) means
-# every built-in widget -- the text field, buttons, the code blocks a tool result
-# renders into -- is legible even if a CSS selector below ever stops matching a
-# Streamlit release.
+# NOTE: the palette does NOT live here. Streamlit's theme is fixed when the
+# server starts -- st._config.set_option("theme.base", ...) from a running script
+# does not repaint, and Streamlit caches the active theme in localStorage, so a
+# server-side change is ignored on the next load. Measured; see the "Dashboard v2"
+# section of Fweddie-notes.md.
+#
+# The dashboard therefore carries its own light and dark palettes as CSS custom
+# properties in dashboard.py and picks one server-side, so the first paint is
+# already correct. What is set here is only what a CSS variable cannot reach: the
+# widget defaults Streamlit computes before any of our CSS runs -- the text field,
+# the code blocks a tool result renders into, the spinner.
+
 [theme]
+# "dark" matches the dashboard's default; the in-page toggle switches to light
+# without consulting this value. Keeping it in step means the brief moment before
+# our stylesheet applies is dark too, rather than a white flash.
 base = "dark"
 primaryColor = "#3b9eff"
-backgroundColor = "#0a0a0a"
-secondaryBackgroundColor = "#141416"
-textColor = "#e8eaed"
+backgroundColor = "#262624"
+secondaryBackgroundColor = "#1f1e1c"
+textColor = "#eceae4"
 font = "sans serif"
 
 [server]

@@ -51,6 +51,11 @@ class RecordingLLM(FrameProcessor):
         super().__init__()
         self.contexts: list[LLMContext] = []
         self.interruptions = 0
+        # The shared context, set by build(). Clear is observed here rather than
+        # as a frame: LLMMessagesUpdateFrame is CONSUMED by the user aggregator
+        # upstream, so the LLM never sees it. What matters is the state it
+        # leaves behind.
+        self.context: LLMContext | None = None
         self.ready = asyncio.Event()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -78,7 +83,7 @@ class RecordingLLM(FrameProcessor):
         return ""
 
 
-async def build(typed: Path, stop: Path):
+async def build(typed: Path, stop: Path, clear: Path | None = None):
     """A minimal pipeline: watcher -> user agg -> recorder.
 
     The same ORDER as agent.py: the watcher is upstream of the aggregator. That
@@ -87,16 +92,18 @@ async def build(typed: Path, stop: Path):
     context = LLMContext()
     user_agg = LLMUserAggregator(context, params=LLMUserAggregatorParams())
     llm = RecordingLLM()
+    llm.context = context
     watcher = agent.DashboardControlWatcher(
-        str(typed), str(stop), bus=None, poll_secs=0.02
+        str(typed), str(stop), bus=None, poll_secs=0.02,
+        clear_path=str(clear) if clear else None,
     )
     pipeline = Pipeline([watcher, user_agg, llm])
     task = PipelineTask(pipeline)
     return pipeline, task, llm
 
 
-async def drive(typed: Path, stop: Path) -> tuple[RecordingLLM, int]:
-    pipeline, task, llm = await build(typed, stop)
+async def drive(typed: Path, stop: Path, clear: Path | None = None):
+    pipeline, task, llm = await build(typed, stop, clear)
     # WorkerRunner, not task.run(): PipelineTask.run() is the worker's internal
     # entry point and needs a params argument. The runner is what agent.py uses.
     runner = WorkerRunner()
@@ -123,6 +130,20 @@ async def drive(typed: Path, stop: Path) -> tuple[RecordingLLM, int]:
                 break
             await asyncio.sleep(0.01)
         interruptions = llm.interruptions
+
+        # Clear: the conversation must be forgotten, and no answer started.
+        history_before = len(llm.context.get_messages()) if llm.context else 0
+        contexts_before = len(llm.contexts)
+        if clear is not None:
+            clear.write_text(json.dumps({"id": 1, "ts": time.time()}), encoding="utf-8")
+            for _ in range(200):
+                if llm.context and not llm.context.get_messages():
+                    break
+                await asyncio.sleep(0.01)
+            # Give a wrongly-started turn a chance to show up as a new context.
+            await asyncio.sleep(0.15)
+        history_after = len(llm.context.get_messages()) if llm.context else 0
+        contexts_after = len(llm.contexts)
     finally:
         await runner.cancel()
         worker.cancel()
@@ -130,7 +151,15 @@ async def drive(typed: Path, stop: Path) -> tuple[RecordingLLM, int]:
             await worker
         except (asyncio.CancelledError, Exception):
             pass
-    return llm, text, consumed, interruptions
+    return {
+        "llm": llm,
+        "text": text,
+        "consumed": consumed,
+        "interruptions": interruptions,
+        "history_before": history_before,
+        "history_after": history_after,
+        "new_contexts": contexts_after - contexts_before,
+    }
 
 
 async def main() -> int:
@@ -138,7 +167,9 @@ async def main() -> int:
     typed = tmp / "typed.json"
     stop = tmp / "stop.json"
 
-    llm, text, consumed, interruptions = await drive(typed, stop)
+    clear = tmp / "clear.json"
+    r = await drive(typed, stop, clear)
+    text, consumed, interruptions = r["text"], r["consumed"], r["interruptions"]
 
     failures = []
     if text != "what is on my calendar":
@@ -169,6 +200,25 @@ async def main() -> int:
             f"typed message would flow away from it: {stages}"
         )
     print(f"4. real pipeline order                       : {stages}")
+
+    # 5. Clear empties the shared context and starts no inference.
+    if r["history_before"] < 1:
+        failures.append(
+            "nothing was in the context before Clear, so clearing it proves nothing"
+        )
+    if r["history_after"] != 0:
+        failures.append(
+            f"Clear left {r['history_after']} message(s) in the context"
+        )
+    if r["new_contexts"] != 0:
+        failures.append(
+            f"Clear started {r['new_contexts']} new LLM turn(s); clearing is not a question"
+        )
+    print(
+        f"5. Clear emptied the context                : "
+        f"{r['history_before']} -> {r['history_after']} messages, "
+        f"{r['new_contexts']} new turn(s)"
+    )
 
     if failures:
         for f in failures:

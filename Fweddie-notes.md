@@ -712,3 +712,90 @@ pauses (3.20 s and 6.01 s against a 2.5 s budget). That is pre-existing on
 `main` (3.22 s / 6.11 s there, measured by stashing this branch's changes) and
 is the known consequence of holding those pauses inside one utterance instead
 of splitting it. Not touched here.
+
+---
+
+# Dashboard v2: Material mic, a real light/dark switch, Clear history
+
+Same branch. Three changes, one of which turned out to be a Streamlit limitation
+rather than a styling choice.
+
+## The microphone is now a Material icon, not an emoji
+
+The 🎤 emoji is drawn by the font in its own colours, so no CSS colour can reach
+it -- the blue "listening" state the previous version wanted was impossible with
+it. `st.button(icon=":material/mic:")` renders the glyph as text in the
+"Material Symbols Rounded" font, and that span inherits the button's `color`.
+
+Measured over CDP, with the rule emitted only while the mic is on:
+
+    dark  live  : button rgb(59,158,255)   icon rgb(59,158,255)   glyph "mic"
+    dark  muted : button rgb(236,234,228)  icon rgb(236,234,228)  glyph "mic"
+    light live  : button rgb(11,111,212)   icon rgb(11,111,212)   glyph "mic"
+    light muted : button rgb(31,30,29)     icon rgb(31,30,29)     glyph "mic"
+
+The glyph is the same shape as the Flaticon microphone asked for (capsule head,
+stem, base). The button also gained a 14% blue tint background while live, via
+`color-mix(in srgb, <that blue> 14%, transparent)`.
+
+The blue is per-theme, not one shared value. Measured contrast against the page:
+#3b9eff is 5.4:1 on the dark page but only 2.7:1 on the light one, under the 3:1
+floor for a graphical control, so light mode uses #0b6fd4 (4.7:1 on light).
+
+## The theme switch: Streamlit's own theme cannot be changed at runtime
+
+This is the part worth recording. `st._config.set_option("theme.base", "light")`
+from a running script does NOT repaint. Measured on Streamlit 1.67:
+
+    before click : rgb(10,10,10)
+    after click  : rgb(10,10,10)     (server said "light")
+    after RELOAD : rgb(10,10,10)     (server still said "light")
+
+and `st.context.theme.type` kept reporting the OLD value throughout -- its own
+docstring warns it may be wrong around a theme change (streamlit issue #11920).
+Streamlit also caches the active theme in localStorage under
+`stActiveTheme-<pathname>-v<n>`, which wins over the server on the next load.
+
+So the theme is CSS variables, and the palette is chosen SERVER-side before the
+stylesheet is emitted: the active palette goes on `:root`, so the first paint is
+already right and there is no flash. A `data-theme` attribute is also set on
+`<html>`, from a 1 px `st.iframe`, matching what the OnIt UI does. Measured after
+a toggle, both palettes and the attribute:
+
+    dark  : app bg rgb(38,38,36)  text rgb(236,234,228)  attr "dark"
+    light : app bg rgb(250,249,245) text rgb(31,30,29)   attr "light"
+
+Palette values are copied from ~/onit/src/ui/static/style.css (warm paper light,
+warm charcoal dark, terracotta accent), which is why the two interfaces read as
+the same family.
+
+Two dead ends, both measured rather than assumed:
+
+* `st.html()` sanitises `<script>` away -- the attribute stayed `null`.
+* `st.iframe(..., height=0)` raises: height must be a POSITIVE integer. The
+  frame is 1 px and its keyed container is `display:none`.
+* `st.components.v1.html` works but is deprecated ("will be removed after
+  2026-06-01"); its docstring names `st.iframe` as the replacement, and same
+  origin HTML there does run JavaScript.
+
+The choice lives in `?theme=`, not only in session_state, so it survives a reload
+AND the server can see it -- the toggle's glyph is right on the first render.
+
+## Clear history is two halves
+
+    Clear -> <log>.clear.json -> broadcast_interruption()
+                              -> LLMMessagesUpdateFrame(messages=[], run_llm=False)
+                              -> "cleared" event
+
+`run_llm=False` matters: clearing is not a question and must not be answered.
+The interruption first matters too -- clearing the context of a turn still
+generating would let the in-flight reply finish and be written back into the
+freshly emptied context, so the conversation would reappear one turn at a time.
+
+The page empties immediately (a session marker) rather than waiting for the
+agent's `cleared` event, which can take a poll interval. The event is what makes
+the clear survive a reload -- without it, a refresh would bring the whole
+conversation back. Both halves are pinned by tests.
+
+Measured end to end in the browser: 4 transcript rows -> 0 rows on click, and
+`events.jsonl.clear.json` written.

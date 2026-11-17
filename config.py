@@ -452,6 +452,15 @@ DASHBOARD_STOP_FILE = os.environ.get(
     "FWEDDIE_DASHBOARD_STOP",
     str(Path(DASHBOARD_LOG).with_name(Path(DASHBOARD_LOG).name + ".stop.json")))
 
+# Clear chat history. The dashboard writes {"id": ..., "ts": ...}; the agent
+# consumes it and empties the shared LLM context, so "clear" means the model
+# forgets the conversation rather than the page merely hiding it. Both halves
+# are needed: hiding alone would come back on reload, and clearing alone would
+# leave the page looking unchanged until the agent's next poll.
+DASHBOARD_CLEAR_FILE = os.environ.get(
+    "FWEDDIE_DASHBOARD_CLEAR",
+    str(Path(DASHBOARD_LOG).with_name(Path(DASHBOARD_LOG).name + ".clear.json")))
+
 # The mic toggle. Unlike the two above this file is *state*, not an action: it
 # persists, and the agent reads it every poll rather than consuming it.
 #

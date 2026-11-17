@@ -1,20 +1,37 @@
-"""Fweddie -- Streamlit dashboard: a dark chat interface with voice and text.
+"""Fweddie -- Streamlit dashboard: a chat interface with voice and text.
 
 Modelled on the Ollama chat window: one column of messages, a composer pinned at
 the bottom, and the controls inside the composer rather than in a sidebar. The
 differences are the ones this agent needs -- a microphone toggle that doubles as
-the voice-agent indicator, and a Send button that becomes Stop while a turn is
-in flight.
+the voice-agent indicator, a Send button that becomes Stop while a turn is in
+flight, and a light/dark switch.
 
-Three processes/files are involved, and they stay deliberately decoupled:
+The palette and the theme switch are adapted from the OnIt web interface
+(~/onit/src/ui/static/style.css and app.js): a warm paper-white light theme and a
+warm charcoal dark theme, both driven by CSS custom properties that a
+``data-theme`` attribute on ``<html>`` flips.
+
+Why the theme is switched in the browser and not in Streamlit
+--------------------------------------------------------------
+Streamlit's own theme is fixed when the server starts. ``st._config.set_option
+("theme.base", ...)`` from a running script does NOT repaint -- measured: set to
+"light", the page stayed rgb(10,10,10) through a click *and* a full reload, and
+``st.context.theme`` kept reporting the old value (its docstring admits it may be
+wrong around a theme change). So the theme here is a set of CSS variables plus a
+``data-theme`` attribute set from a component iframe, which is exactly what the
+OnIt UI does with its own ``data-theme``. Measured after a toggle: app background
+rgb(250,249,245) <-> rgb(38,38,36), text and code-block colours following.
+
+Four processes/files are involved, and they stay deliberately decoupled:
 
   * the agent appends one JSON object per line to ``config.DASHBOARD_LOG``; this
     page tails that file and renders it as a chat;
   * the mic toggle writes ``<log>.mic_control.json``, which the agent's
     ``MicControlWatcher`` polls;
-  * Send writes ``<log>.typed.json`` and Stop writes ``<log>.stop.json``, which
-    the agent's ``DashboardControlWatcher`` polls and turns into an
-    ``LLMMessagesAppendFrame`` and an ``InterruptionFrame`` respectively.
+  * Send writes ``<log>.typed.json``, Stop writes ``<log>.stop.json`` and Clear
+    writes ``<log>.clear.json``, which the agent's ``DashboardControlWatcher``
+    polls and turns into an ``LLMMessagesAppendFrame``, an ``InterruptionFrame``
+    and an ``LLMMessagesUpdateFrame(messages=[])`` respectively.
 
 Nothing here can break the voice loop: the worst case is that a control file is
 written and no agent is running to read it.
@@ -33,6 +50,7 @@ The event vocabulary the agent emits is ``kind``-based, NOT role-based:
     bot_text       {text}                  -- the reply
     bot_stopped    {}
     interrupted    {source?}               -- Stop pressed, or a barge-in
+    cleared        {}                      -- Clear pressed; history starts here
     tool_call      {tool, args}
     tool_result    {tool, result}
     approval       {...}
@@ -53,6 +71,7 @@ LOG_PATH = Path(config.DASHBOARD_LOG)
 MIC_CONTROL_FILE = Path(config.DASHBOARD_MIC_FILE)
 TYPED_FILE = Path(config.DASHBOARD_TYPED_FILE)
 STOP_FILE = Path(config.DASHBOARD_STOP_FILE)
+CLEAR_FILE = Path(config.DASHBOARD_CLEAR_FILE)
 
 ASSETS = Path(__file__).parent / "assets"
 HUSKY = ASSETS / "husky.png"
@@ -64,153 +83,327 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+
 # ---------------------------------------------------------------------------
-# Palette and styling
+# Palette
 # ---------------------------------------------------------------------------
-# The theme in .streamlit/config.toml sets the base colours; this adds what a
-# theme cannot express -- the composer's pill shape, the blue "listening" mic,
-# and hiding the Streamlit chrome that makes a chat page look like a dashboard.
+# Two complete palettes rather than one set of colours with the odd override.
+# The OnIt UI does the same (its :root and [data-theme="dark"] blocks each define
+# every variable), and it is what makes a switch look deliberate: nothing is
+# left inheriting a colour from the other theme.
 #
-# Selectors are used defensively: anything that is only cosmetic is written so
-# that a Streamlit release renaming a class degrades to "less pretty" rather
-# than "unreadable". The colours that matter for legibility come from the theme.
+# Values copied from ~/onit/src/ui/static/style.css so the two interfaces read as
+# the same family -- warm off-white paper in light, warm charcoal in dark, a
+# terracotta accent, and muted greys for the secondary text.
 
-BLUE = "#3b9eff"
-GREY = "#8b8f96"
+THEMES = {
+    "light": {
+        "bg": "#faf9f5",
+        "panel": "#f0eee6",
+        "hover": "#e8e6dc",
+        "active": "#e0ddd1",
+        "input": "#ffffff",
+        "bubble": "#f0eee6",
+        "code": "#f6f6f4",
+        "border": "#dedcd1",
+        "border-strong": "#c9c6b8",
+        "text": "#1f1e1d",
+        "muted": "#6e6d66",
+        "faint": "#a3a196",
+        "accent": "#c96442",
+        "accent-hover": "#b4522f",
+        "on-accent": "#ffffff",
+        "danger": "#c0392b",
+        "shadow": "0 2px 12px rgba(0, 0, 0, 0.06)",
+    },
+    "dark": {
+        "bg": "#262624",
+        "panel": "#1f1e1c",
+        "hover": "#32312e",
+        "active": "#3a3835",
+        "input": "#30302e",
+        "bubble": "#33322f",
+        "code": "#1e1d1b",
+        "border": "#3d3c38",
+        "border-strong": "#4c4a45",
+        "text": "#eceae4",
+        "muted": "#a5a396",
+        "faint": "#706e64",
+        "accent": "#d97757",
+        "accent-hover": "#e08b6e",
+        "on-accent": "#ffffff",
+        "danger": "#e07b6a",
+        "shadow": "0 2px 12px rgba(0, 0, 0, 0.35)",
+    },
+}
 
-CSS = f"""
-<style>
+# The microphone is blue in both themes while the agent is accepting audio -- it
+# is a state, not decoration -- but not the SAME blue. One blue cannot be legible
+# on both a near-black and a near-white background: #3b9eff is 5.4:1 on the dark
+# page and only 2.7:1 on the light one, under the 3:1 floor for a graphical
+# control. So each palette carries its own shade, picked to clear that floor in
+# its own theme (5.4:1 dark, 4.7:1 light).
+MIC_LIVE = {"light": "#0b6fd4", "dark": "#3b9eff"}
+MIC_LIVE_HOVER = {"light": "#0a5cb0", "dark": "#57aeff"}
+
+
+def _var_block(palette: dict) -> str:
+    return "".join(f"--fw-{k}: {v}; " for k, v in palette.items())
+
+
+# ---------------------------------------------------------------------------
+# Which theme is active
+# ---------------------------------------------------------------------------
+# Resolved BEFORE any styling is emitted, because the palette that goes into
+# :root is the active one -- that is what makes the first paint correct.
+#
+# The choice lives in the URL (``?theme=dark``) rather than only in
+# session_state, for two reasons: it survives a reload, and the server can read
+# it, so the toggle shows the right glyph on the first render. localStorage
+# cannot do the second -- the browser could repaint itself from it, but Python
+# would not know, and the button would show the wrong icon.
+#
+# Why not Streamlit's own theme setting: it is fixed when the server starts.
+# st._config.set_option("theme.base", ...) from a running script does NOT
+# repaint. Measured on Streamlit 1.67: set to "light", the page stayed
+# rgb(10,10,10) through the click AND through a full reload, while
+# st.context.theme kept reporting the old value (its docstring admits it may be
+# wrong around a theme change). So the theme here is CSS variables the server
+# emits, which is also how the OnIt UI does it.
+
+VALID_THEMES = ("light", "dark")
+DEFAULT_THEME = "dark"
+
+ss = st.session_state
+if "theme" not in ss:
+    wanted = st.query_params.get("theme")
+    ss["theme"] = wanted if wanted in VALID_THEMES else DEFAULT_THEME
+theme = ss["theme"]
+_ACTIVE = theme if theme in THEMES else DEFAULT_THEME
+
+
+# The static rules below use var(--fw-*) everywhere, so they are written as a
+# plain string: nothing here needs Python interpolation, which keeps the braces
+# of the CSS out of an f-string. Only the two variable blocks are generated.
+_BASE_CSS = """
 /* --- page frame ------------------------------------------------------- */
-/* Selectors here were checked against Streamlit 1.67's own bundle, not
-   guessed. Where a name could not be confirmed it is not used: a rule that
-   silently matches nothing is worse than no rule, because it looks like the
-   styling is in place. */
-.block-container {{
+/* Selectors were checked against Streamlit 1.67's own bundle (the data-testid
+   names come from the rendered DOM, not from documentation). Anything purely
+   cosmetic degrades to "less pretty" if a name changes; the colours that matter
+   for legibility come from the variables above. */
+html, body, .stApp,
+[data-testid="stAppViewContainer"], [data-testid="stMain"],
+[data-testid="stMainBlockContainer"] {
+    background: var(--fw-bg) !important;
+    color: var(--fw-text) !important;
+    font-family: var(--fw-font) !important;
+}
+header[data-testid="stHeader"] { background: transparent !important; }
+[data-testid="stToolbar"], [data-testid="stAppDeployButton"] { display: none !important; }
+#MainMenu, footer { visibility: hidden; }
+
+.block-container {
     padding-top: 1.1rem;
     padding-bottom: 8rem;   /* room for the pinned composer */
-    max-width: 800px;
-}}
-header[data-testid="stHeader"] {{ background: transparent; }}
-#MainMenu, footer {{ visibility: hidden; }}
+    max-width: 820px;
+}
 
 /* --- header ----------------------------------------------------------- */
-.fw-head {{
+.fw-head {
     display: flex; align-items: center; gap: .6rem;
     margin: 0 0 1.2rem 0;
-}}
-.fw-head img {{ width: 30px; height: 30px; display: block; }}
-.fw-head .fw-name {{ font-size: 1.02rem; font-weight: 600; letter-spacing: .01em; }}
-.fw-head .fw-sub {{ font-size: .74rem; color: {GREY}; margin-top: -1px; }}
+}
+.fw-head img { width: 30px; height: 30px; display: block; border-radius: 50%; }
+.fw-head .fw-name { font-size: 1.02rem; font-weight: 600; letter-spacing: .01em; }
+.fw-head .fw-sub { font-size: .74rem; color: var(--fw-muted); margin-top: -1px; }
+
+/* The header's icon buttons (theme, clear). Quiet by default -- they are
+   secondary to the conversation -- and they only show a surface on hover, the
+   way the OnIt header's buttons behave. */
+.st-key-themebtn button, .st-key-clearbtn button,
+.st-key-themebtn [data-testid="stBaseButton-secondary"],
+.st-key-clearbtn [data-testid="stBaseButton-secondary"] {
+    border-radius: 50%; min-height: 2.2rem; min-width: 2.2rem;
+    height: 2.2rem; width: 2.2rem; padding: 0;
+    border: 1px solid transparent; background: transparent;
+    color: var(--fw-muted); font-size: 1rem; line-height: 1;
+}
+.st-key-themebtn button:hover, .st-key-clearbtn button:hover {
+    background: var(--fw-hover); border-color: var(--fw-border);
+    color: var(--fw-text);
+}
 
 /* --- messages --------------------------------------------------------- */
-/* The transcript is rendered as plain blocks rather than st.chat_message:
-   that helper centres a 700 px column of its own and puts a fixed avatar
-   beside every bubble, which fights the pinned composer. */
-.fw-row {{ display: flex; gap: .7rem; margin: 0 0 1.15rem 0; align-items: flex-start; }}
-.fw-av {{
+/* The transcript is rendered as plain blocks rather than st.chat_message: that
+   helper centres a 700 px column of its own and puts a fixed avatar beside every
+   bubble, which fights the pinned composer. */
+.fw-row { display: flex; gap: .7rem; margin: 0 0 1.15rem 0; align-items: flex-start; }
+.fw-av {
     flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     font-size: .72rem; font-weight: 700; overflow: hidden;
-}}
-.fw-av img {{ width: 100%; height: 100%; object-fit: cover; }}
-.fw-av-bot {{ background: #f2f3f5; }}
-.fw-av-you {{ background: #26282c; color: #cfd3d8; }}
-.fw-body {{ flex: 1 1 auto; min-width: 0; }}
-.fw-who {{ font-size: .78rem; font-weight: 600; margin-bottom: .15rem; }}
-.fw-text {{ font-size: .95rem; line-height: 1.55; white-space: pre-wrap; word-wrap: break-word; }}
-.fw-meta {{ font-size: .7rem; color: {GREY}; margin-top: .2rem; }}
-.fw-draft {{ color: {GREY}; font-style: italic; }}
+}
+.fw-av img { width: 100%; height: 100%; object-fit: cover; }
+.fw-av-bot { background: var(--fw-bubble); }
+.fw-av-you { background: var(--fw-active); color: var(--fw-muted); }
+.fw-body { flex: 1 1 auto; min-width: 0; }
+.fw-who { font-size: .78rem; font-weight: 600; margin-bottom: .15rem; }
+.fw-text { font-size: .95rem; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.fw-meta { font-size: .7rem; color: var(--fw-faint); margin-top: .2rem; }
+.fw-draft { color: var(--fw-muted); font-style: italic; }
 
 /* A tool call is a quiet inset card: it is context, not conversation. */
-.fw-tool {{
-    border: 1px solid #26282c; border-radius: .6rem; padding: .55rem .7rem;
-    margin: .2rem 0 .9rem 2.4rem; background: #101113;
-}}
-.fw-tool .fw-tool-name {{ font-size: .78rem; font-weight: 600; color: #cfd3d8; }}
+.fw-tool {
+    border: 1px solid var(--fw-border); border-radius: .6rem; padding: .55rem .7rem;
+    margin: .2rem 0 .9rem 2.4rem; background: var(--fw-panel);
+}
+.fw-tool .fw-tool-name { font-size: .78rem; font-weight: 600; color: var(--fw-text); }
+
+/* Tool payloads arrive through st.code so they can be copied; give them the
+   palette's code surface instead of Streamlit's own. */
+[data-testid="stCode"], [data-testid="stCode"] pre, [data-testid="stCode"] code {
+    background: var(--fw-code) !important;
+    color: var(--fw-text) !important;
+    border: 1px solid var(--fw-border) !important;
+    border-radius: .6rem !important;
+}
 
 /* --- composer --------------------------------------------------------- */
 /* st.chat_input cannot hold a button beside it, so the composer is a container
    of columns styled into a pill and pinned to the bottom of the viewport --
    that is what makes it read as a chat box rather than a form at the end of a
    page. The keyed container gives us .st-key-composer for free. */
-.st-key-composer {{
+.st-key-composer {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 100;
     padding: .85rem 1rem 1.05rem 1rem;
-    background: linear-gradient(to top, #0a0a0a 62%, rgba(10,10,10,0));
-}}
-.st-key-composer > div {{ max-width: 800px; margin: 0 auto; }}
-.st-key-composer [data-testid="stHorizontalBlock"] {{
+    background: linear-gradient(to top, var(--fw-bg) 62%, transparent);
+}
+.st-key-composer > div { max-width: 820px; margin: 0 auto; }
+.st-key-composer [data-testid="stHorizontalBlock"] {
     align-items: center; gap: .35rem;
-    background: #141416;
-    border: 1px solid #2a2c30;
+    background: var(--fw-input);
+    border: 1px solid var(--fw-border-strong);
     border-radius: 1.4rem;
-    padding: .28rem .38rem;
-}}
+    padding: .3rem .4rem;
+    box-shadow: var(--fw-shadow);
+}
 /* The text field loses its own box: the pill above is the box. */
-.st-key-composer [data-testid="stTextInputRootElement"] {{
-    background: transparent; border: none; box-shadow: none;
-}}
-.st-key-composer [data-testid="stTextInputRootElement"] input {{
-    background: transparent; border: none; box-shadow: none;
-    padding-left: .3rem;
-}}
-.st-key-composer [data-testid="stTextInputRootElement"] input:focus {{ box-shadow: none; }}
+.st-key-composer [data-testid="stTextInputRootElement"] {
+    background: transparent !important; border: none !important;
+    box-shadow: none !important;
+}
+.st-key-composer [data-testid="stTextInputRootElement"] input {
+    background: transparent !important; border: none !important;
+    box-shadow: none !important; color: var(--fw-text) !important;
+    padding-left: .35rem;
+}
+.st-key-composer [data-testid="stTextInputRootElement"] input::placeholder {
+    color: var(--fw-faint) !important;
+}
+.st-key-composer [data-testid="stTextInputRootElement"] input:focus { box-shadow: none !important; }
 
-/* Buttons: circular and quiet. data-testid="stBaseButton-secondary" is the
-   name Streamlit 1.67 actually emits for a plain st.button (confirmed in its
-   bundle: data-testid is stBaseButton-<kind>); a bare `button` element
+/* Buttons: circular and quiet. data-testid="stBaseButton-secondary" is the name
+   Streamlit 1.67 actually emits for a plain st.button; a bare `button` element
    selector is kept as the fallback so the shape survives a rename. */
 .st-key-composer button,
-.st-key-composer [data-testid="stBaseButton-secondary"] {{
+.st-key-composer [data-testid="stBaseButton-secondary"] {
     border-radius: 50%; min-height: 2.3rem; min-width: 2.3rem;
     height: 2.3rem; width: 2.3rem; padding: 0;
-    border: 1px solid #2a2c30; background: #1b1d21; color: #e8eaed;
-    font-size: .95rem; line-height: 1;
-}}
-.st-key-composer button:hover {{ background: #23262b; border-color: #3a3d42; }}
+    border: 1px solid var(--fw-border); background: var(--fw-panel);
+    color: var(--fw-text); font-size: 1rem; line-height: 1;
+}
+.st-key-composer button:hover { background: var(--fw-hover); border-color: var(--fw-border-strong); }
 
-/* The per-button rules below repeat the [data-testid=...] attribute selector
-   on purpose. The shared rule above is two classes deep
-   (.st-key-composer + [data-testid]) and so outranks a plain
-   ".st-key-sendbtn button" (one class + one element) -- the first version of
-   this stylesheet set the Send background and watched it lose, leaving Send
-   the same grey as everything else. Matching the attribute selector makes the
-   specificity equal, and these come later, so they win. */
+/* The per-button rules below repeat the [data-testid=...] attribute selector on
+   purpose. The shared rule above is two classes deep (.st-key-composer + ...)
+   and so outranks a plain ".st-key-sendbtn button" (one class + one element) --
+   the first version of this stylesheet set the Send background and watched it
+   lose, leaving Send the same grey as everything else. Matching the attribute
+   selector makes the specificity equal, and these come later, so they win. */
 
-/* Send: light, because it is the primary action. */
+/* Send: the accent, because it is the primary action. */
 .st-key-sendbtn button,
-.st-key-sendbtn [data-testid="stBaseButton-secondary"] {{
-    background: #e8eaed; border-color: #e8eaed; color: #0a0a0a;
-}}
-.st-key-sendbtn button:hover {{ background: #ffffff; border-color: #ffffff; }}
+.st-key-sendbtn [data-testid="stBaseButton-secondary"] {
+    background: var(--fw-accent); border-color: var(--fw-accent);
+    color: var(--fw-on-accent);
+}
+.st-key-sendbtn button:hover { background: var(--fw-accent-hover); border-color: var(--fw-accent-hover); }
 
 /* Stop: red, so it can never be mistaken for Send. */
 .st-key-stopbtn button,
-.st-key-stopbtn [data-testid="stBaseButton-secondary"] {{
-    background: #b3261e; border-color: #b3261e; color: #ffffff;
-}}
-.st-key-stopbtn button:hover {{ background: #d1342a; border-color: #d1342a; }}
+.st-key-stopbtn [data-testid="stBaseButton-secondary"] {
+    background: var(--fw-danger); border-color: var(--fw-danger); color: #ffffff;
+}
+.st-key-stopbtn button:hover { filter: brightness(1.12); }
 
-/* Mic: monochrome when idle. The blue "accepting audio" state is a separate
-   rule emitted only while the mic is on (see mic_button) rather than a class
-   toggled on the container -- Streamlit owns that container's class list, so
-   there is no supported way to add one to it. */
+/* Mic: monochrome when idle -- the icon inherits the button's colour, which is
+   why the live state can be expressed as one colour on the button. */
 .st-key-micbtn button,
-.st-key-micbtn [data-testid="stBaseButton-secondary"] {{ color: {GREY}; }}
+.st-key-micbtn [data-testid="stBaseButton-secondary"] { color: var(--fw-text); }
 
 /* Placeholders for the features that come later (file upload, model picker).
    Disabled buttons so the layout is final and the labels are visible, but
    nothing pretends to work. */
 .st-key-attachph button, .st-key-modelph button,
 .st-key-attachph [data-testid="stBaseButton-secondary"],
-.st-key-modelph [data-testid="stBaseButton-secondary"] {{
-    color: #5c6067 !important; border-style: dashed !important;
+.st-key-modelph [data-testid="stBaseButton-secondary"] {
+    color: var(--fw-faint) !important; border-style: dashed !important;
     cursor: not-allowed;
-}}
-</style>
+}
+
+/* --- status ----------------------------------------------------------- */
+[data-testid="stCaptionContainer"] { color: var(--fw-faint) !important; }
+[data-testid="stCaptionContainer"] code {
+    background: var(--fw-panel) !important; color: var(--fw-muted) !important;
+}
+
+/* The theme-sync iframe: its only job is to run one line of JavaScript, so it
+   must take no space. It cannot be height:0 (st.iframe rejects that), hence a
+   1 px frame removed from the flow here. */
+.st-key-themesync { display: none !important; }
 """
 
-st.markdown(CSS, unsafe_allow_html=True)
+_CSS = (
+    "<style>\n"
+    # The ACTIVE theme's palette goes on :root, so the first paint is already
+    # correct -- no flash of the other theme while a script catches up. This is
+    # the rule that actually paints.
+    ":root { " + _var_block(THEMES[_ACTIVE]) + "}\n"
+    # Both palettes are also defined against the attribute, which is what the
+    # OnIt UI keys off, and a component below sets that attribute on <html> so
+    # the page's state is visible in the DOM. These blocks are not load-bearing
+    # (the :root rule above is), but they are not dead either: the attribute is
+    # always present once the component has run.
+    '[data-theme="light"] { ' + _var_block(THEMES["light"]) + "}\n"
+    '[data-theme="dark"] { ' + _var_block(THEMES["dark"]) + "}\n"
+    # The font stack is the OnIt UI's, so the two read alike.
+    ":root { --fw-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, "
+    "'Helvetica Neue', Arial, sans-serif; }\n"
+    + _BASE_CSS
+    + "</style>"
+)
+st.markdown(_CSS, unsafe_allow_html=True)
+
+# Record the theme on <html>, the way the OnIt UI does (app.js:
+# document.documentElement.setAttribute("data-theme", theme)).
+#
+# A same-origin iframe can reach window.parent.document, which is the only way to
+# set an attribute on the page's <html> from Streamlit. st.html() is not an
+# option: it sanitises <script> away -- measured, the attribute stayed null.
+# st.iframe is used rather than st.components.v1.html because the latter is
+# deprecated ("will be removed after 2026-06-01"); its docstring names
+# st.iframe as the replacement and says same-origin HTML runs JavaScript. The
+# frame is 0 px tall so it occupies no space.
+_THEME_JS = (
+    "<script>window.parent.document.documentElement"
+    '.setAttribute("data-theme", "__THEME__");</script>'
+)
+# height must be a POSITIVE pixel count ("height must be either a positive
+# integer, 'stretch', or 'content'" -- 0 is rejected), so the frame is hidden by
+# its keyed container instead. A display:none iframe still loads and runs its
+# script, which is all this one is for.
+with st.container(key="themesync"):
+    st.iframe(_THEME_JS.replace("__THEME__", _ACTIVE), height=1)
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +411,7 @@ st.markdown(CSS, unsafe_allow_html=True)
 # ---------------------------------------------------------------------------
 
 
-def read_events(limit: int = 200) -> list:
+def read_events(limit: int = 400) -> list:
     """Return the last ``limit`` events, oldest first.
 
     Tolerates a line being written at the moment we read it (JSONDecodeError ->
@@ -259,6 +452,35 @@ def read_events(limit: int = 200) -> list:
     return events
 
 
+def cleared_at(events: list) -> float:
+    """The timestamp the visible conversation starts from.
+
+    Two sources, because the two halves of "clear" happen at different moments:
+
+      * the agent's ``cleared`` event, which is authoritative and survives a
+        reload -- it is in the log, so any browser sees the same history;
+      * a session marker, set the instant the button is pressed, so the view
+        empties immediately instead of waiting up to one poll interval for the
+        agent to notice the control file.
+
+    The later of the two wins. Without the second, pressing Clear looks like it
+    did nothing for a fifth of a second; without the first, reloading the page
+    would bring the whole conversation back.
+    """
+    marker = 0.0
+    for ev in events:
+        if ev.get("kind") == "cleared":
+            try:
+                marker = max(marker, float(ev.get("ts") or 0))
+            except (TypeError, ValueError):
+                pass
+    try:
+        marker = max(marker, float(ss.get("cleared_ts") or 0))
+    except (TypeError, ValueError):
+        pass
+    return marker
+
+
 def mic_state() -> bool:
     try:
         return bool(json.loads(MIC_CONTROL_FILE.read_text(encoding="utf-8"))["enabled"])
@@ -296,6 +518,17 @@ def request_stop() -> None:
     _drop(STOP_FILE, {"id": uuid.uuid4().hex, "ts": time.time()})
 
 
+def request_clear() -> None:
+    """Ask the agent to forget the conversation, and empty the view now.
+
+    ``ts`` matters here: if no agent is running when this is pressed the file
+    stays on disk, and the agent that starts later must not treat a clear from
+    minutes ago as an instruction about the new session.
+    """
+    _drop(CLEAR_FILE, {"id": uuid.uuid4().hex, "ts": time.time()})
+    ss["cleared_ts"] = time.time()
+
+
 def fmt_time(ts) -> str:
     try:
         return time.strftime("%H:%M", time.localtime(float(ts)))
@@ -326,7 +559,7 @@ def turn_in_flight(events: list) -> bool:
         kind = ev.get("kind")
         if kind in ("user_text", "bot_started", "tool_call", "user_started"):
             busy = True
-        elif kind in ("bot_stopped", "session_end", "interrupted"):
+        elif kind in ("bot_stopped", "session_end", "interrupted", "cleared"):
             busy = False
         if kind in ("user_text", "bot_started", "bot_stopped", "tool_call", "interrupted"):
             last_ts = ev.get("ts")
@@ -340,7 +573,7 @@ def turn_in_flight(events: list) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Header
+# Header: identity, theme toggle, clear history
 # ---------------------------------------------------------------------------
 
 husky_uri = ""
@@ -359,18 +592,47 @@ if session:
     if session.get("asr"):
         bits.append(str(session["asr"]))
     if bits:
-        subtitle = " · ".join(bits)
+        subtitle = " \u00b7 ".join(bits)
 
-st.markdown(
-    f"""<div class="fw-head">
-      <img src="{husky_uri}" alt="" />
-      <div>
-        <div class="fw-name">Fweddie</div>
-        <div class="fw-sub">{subtitle}</div>
-      </div>
-    </div>""",
-    unsafe_allow_html=True,
-)
+
+h_name, h_theme, h_clear = st.columns([8.4, 0.8, 0.8], vertical_alignment="center")
+
+with h_name:
+    st.markdown(
+        f"""<div class="fw-head">
+          <img src="{husky_uri}" alt="" />
+          <div>
+            <div class="fw-name">Fweddie</div>
+            <div class="fw-sub">{subtitle}</div>
+          </div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+with h_theme:
+    # The glyph is the theme you would switch TO, which is the OnIt convention:
+    # its stylesheet hides the sun in light mode and the moon in dark.
+    with st.container(key="themebtn"):
+        if st.button(
+            "",
+            key="themebtn_btn",
+            icon=":material/dark_mode:" if theme == "light" else ":material/light_mode:",
+            help="Switch to light theme" if theme == "dark" else "Switch to dark theme",
+        ):
+            ss["theme"] = "light" if theme == "dark" else "dark"
+            st.query_params["theme"] = ss["theme"]
+            st.rerun()
+
+with h_clear:
+    with st.container(key="clearbtn"):
+        if st.button(
+            "",
+            key="clearbtn_btn",
+            icon=":material/delete_sweep:",
+            help="Clear chat history (also clears the model's memory of it)",
+        ):
+            request_clear()
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +646,7 @@ def render_event(ev: dict) -> None:
 
     if kind == "user_text":
         source = ev.get("source")
-        who = "You · typed" if source == "typed" else "You"
+        who = "You \u00b7 typed" if source == "typed" else "You"
         st.markdown(
             f"""<div class="fw-row">
               <div class="fw-av fw-av-you">Y</div>
@@ -403,7 +665,7 @@ def render_event(ev: dict) -> None:
             f"""<div class="fw-row">
               <div class="fw-av fw-av-you">Y</div>
               <div class="fw-body"><div class="fw-text fw-draft">
-                {_esc(ev.get("text", ""))}…</div></div></div>""",
+                {_esc(ev.get("text", ""))}\u2026</div></div></div>""",
             unsafe_allow_html=True,
         )
 
@@ -426,15 +688,15 @@ def render_event(ev: dict) -> None:
         body = f'<div class="fw-tool-name">{_esc(ev.get("tool", "tool"))}</div>'
         if args:
             body += f'<div class="fw-meta">{_esc(args[:300])}</div>'
-        body += f'<div class="fw-meta">called · {ts}</div>'
+        body += f'<div class="fw-meta">called \u00b7 {ts}</div>'
         st.markdown(f'<div class="fw-tool">{body}</div>', unsafe_allow_html=True)
 
     elif kind == "tool_result":
         result = str(ev.get("result", ""))
         st.markdown(
             f"""<div class="fw-tool">
-              <div class="fw-tool-name">{_esc(ev.get("tool", "tool"))} — result</div>
-              <div class="fw-meta">{len(result)} chars · {ts}</div>
+              <div class="fw-tool-name">{_esc(ev.get("tool", "tool"))} \u2014 result</div>
+              <div class="fw-meta">{len(result)} chars \u00b7 {ts}</div>
             </div>""",
             unsafe_allow_html=True,
         )
@@ -450,7 +712,7 @@ def render_event(ev: dict) -> None:
             )
         st.markdown(
             f'<div class="fw-meta" style="margin-left:2.4rem">'
-            f'↳ {_esc(ev.get("tool", "tool"))}: {" · ".join(bits)}</div>',
+            f'\u21b3 {_esc(ev.get("tool", "tool"))}: {" \u00b7 ".join(bits)}</div>',
             unsafe_allow_html=True,
         )
 
@@ -458,7 +720,7 @@ def render_event(ev: dict) -> None:
         who = ev.get("source")
         label = "stopped" if who == "dashboard" else "interrupted"
         st.markdown(
-            f'<div class="fw-meta" style="margin-left:2.4rem">⏹ {label} · {ts}</div>',
+            f'<div class="fw-meta" style="margin-left:2.4rem">\u23f9 {label} \u00b7 {ts}</div>',
             unsafe_allow_html=True,
         )
 
@@ -470,25 +732,25 @@ def render_event(ev: dict) -> None:
 
     elif kind == "approval_granted":
         st.markdown(
-            f'<div class="fw-meta">✅ approved {_esc(ev.get("tool", ""))} · {ts}</div>',
+            f'<div class="fw-meta">\u2705 approved {_esc(ev.get("tool", ""))} \u00b7 {ts}</div>',
             unsafe_allow_html=True,
         )
 
     elif kind == "approval_denied":
         st.markdown(
-            f'<div class="fw-meta">⛔ denied {_esc(ev.get("tool", ""))} · {ts}</div>',
+            f'<div class="fw-meta">\u26d4 denied {_esc(ev.get("tool", ""))} \u00b7 {ts}</div>',
             unsafe_allow_html=True,
         )
 
     elif kind == "user_started":
         st.markdown(
-            f'<div class="fw-meta" style="margin-left:2.4rem">🎤 listening… · {ts}</div>',
+            f'<div class="fw-meta" style="margin-left:2.4rem">\U0001f3a4 listening\u2026 \u00b7 {ts}</div>',
             unsafe_allow_html=True,
         )
 
     elif kind == "bot_started":
         st.markdown(
-            f'<div class="fw-meta" style="margin-left:2.4rem">🔊 speaking… · {ts}</div>',
+            f'<div class="fw-meta" style="margin-left:2.4rem">\U0001f50a speaking\u2026 \u00b7 {ts}</div>',
             unsafe_allow_html=True,
         )
 
@@ -509,11 +771,28 @@ def _esc(text) -> str:
 @st.fragment(run_every=1.0)
 def transcript() -> None:
     events = read_events()
+    marker = cleared_at(events)
+
+    if marker:
+        visible = []
+        for ev in events:
+            try:
+                if float(ev.get("ts") or 0) > marker:
+                    visible.append(ev)
+            except (TypeError, ValueError):
+                continue
+        events = visible
+
     if not events:
         if not LOG_PATH.exists():
             st.markdown(
                 '<div class="fw-meta">Waiting for the agent. Start it with '
                 "<code>.venv/bin/python agent.py</code>, then speak or type.</div>",
+                unsafe_allow_html=True,
+            )
+        elif marker:
+            st.markdown(
+                '<div class="fw-meta">History cleared. Say something, or type below.</div>',
                 unsafe_allow_html=True,
             )
         else:
@@ -525,7 +804,7 @@ def transcript() -> None:
 
     # Everything except the session bookkeeping is conversation.
     for ev in events:
-        if ev.get("kind") in ("session_start", "session_end"):
+        if ev.get("kind") in ("session_start", "session_end", "cleared"):
             continue
         render_event(ev)
 
@@ -545,8 +824,6 @@ transcript()
 # sits on the LEFT of the input, the send control on the right. Ollama puts web
 # search there; this puts the microphone there.
 
-ss = st.session_state
-
 # Clearing a keyed text_input cannot be done in the same run that rendered it
 # (Streamlit refuses to modify a widget's state after instantiation), so the
 # Send handler raises a flag and the next run clears the box before it renders.
@@ -565,16 +842,20 @@ def mic_button() -> None:
     # look like Ollama's inline icon button, and this state has to be obvious at
     # a glance -- blue means the agent is accepting audio.
     #
-    # The blue is applied by a class on the container below, not by type
-    # ("primary"), because type expresses emphasis and this expresses state.
+    # The glyph is Material's "mic" (a capsule head, a stem and a base -- the
+    # same shape as the microphone the request came with) rather than the 🎤
+    # emoji, which renders in the font's own colours and so cannot be tinted.
+    # The icon span inherits the button's colour, which is what lets one CSS
+    # rule turn it blue while listening and leave it the text colour when not.
     with st.container(key="micbtn"):
         clicked = st.button(
-            "🎤" if live else "🔇",
+            "",
             key="micbtn_btn",
+            icon=":material/mic:",
             help=(
-                "Listening — the agent is accepting audio. Click to mute."
+                "Listening \u2014 the agent is accepting audio. Click to mute."
                 if live
-                else "Muted — the agent will not transcribe. Click to listen."
+                else "Muted \u2014 the agent will not transcribe. Click to listen."
             ),
         )
     if clicked:
@@ -591,8 +872,9 @@ with st.container(key="composer"):
         # Placeholder: file upload comes later.
         with st.container(key="attachph"):
             st.button(
-                "📎",
+                "",
                 key="attachph_btn",
+                icon=":material/attach_file:",
                 disabled=True,
                 help="Attach a file (coming soon)",
             )
@@ -605,17 +887,18 @@ with st.container(key="composer"):
             "Message",
             key="txt",
             label_visibility="collapsed",
-            placeholder="Message Fweddie, or just start talking…",
+            placeholder="Message Fweddie, or just start talking\u2026",
         )
 
     with c_send:
         if busy:
-            # Wrapped in a keyed container so the CSS can reach it: a
-            # container keyed "stopbtn" becomes .st-key-stopbtn, which is how
-            # the red styling is applied without depending on widget order.
+            # Wrapped in a keyed container so the CSS can reach it: a container
+            # keyed "stopbtn" becomes .st-key-stopbtn, which is how the red
+            # styling is applied without depending on widget order.
             with st.container(key="stopbtn"):
                 stop_clicked = st.button(
-                    "■", key="stopbtn_btn", help="Stop this turn (like barge-in)"
+                    "", key="stopbtn_btn", icon=":material/stop:",
+                    help="Stop this turn (like barge-in)",
                 )
             if stop_clicked:
                 request_stop()
@@ -626,7 +909,8 @@ with st.container(key="composer"):
         else:
             with st.container(key="sendbtn"):
                 send_clicked = st.button(
-                    "➤", key="sendbtn_btn", help="Send (or press Enter)"
+                    "", key="sendbtn_btn", icon=":material/arrow_upward:",
+                    help="Send (or press Enter)",
                 )
             if send_clicked:
                 text = (typed or "").strip()
@@ -639,8 +923,9 @@ with st.container(key="composer"):
         # Placeholder: model selection comes later.
         with st.container(key="modelph"):
             st.button(
-                "⌄",
+                "",
                 key="modelph_btn",
+                icon=":material/expand_more:",
                 disabled=True,
                 help="Choose a model (coming soon)",
             )
@@ -652,12 +937,16 @@ with st.container(key="composer"):
 # and offers no supported way to add to it, so a ".fw-live" selector would have
 # silently matched nothing and the mic would have stayed grey in both states.
 if ss["mic_on"]:
+    live_blue = MIC_LIVE[_ACTIVE]
+    hover_blue = MIC_LIVE_HOVER[_ACTIVE]
     st.markdown(
-        "<style>.st-key-micbtn button{"
-        "background:#3b9eff !important;border-color:#3b9eff !important;"
-        "color:#04121f !important;}"
+        "<style>.st-key-micbtn button,"
+        '.st-key-micbtn [data-testid="stBaseButton-secondary"]{'
+        f"color:{live_blue} !important;border-color:{live_blue} !important;"
+        f"background:color-mix(in srgb, {live_blue} 14%, transparent) !important;}}"
         ".st-key-micbtn button:hover{"
-        "background:#57aeff !important;border-color:#57aeff !important;}</style>",
+        f"color:{hover_blue} !important;border-color:{hover_blue} !important;}}"
+        "</style>",
         unsafe_allow_html=True,
     )
 
@@ -672,6 +961,6 @@ if ss["mic_on"]:
 tail = read_events(limit=5)
 if tail:
     st.caption(
-        f"{len(read_events())} events · {fmt_time(tail[-1].get('ts'))} · "
+        f"{len(read_events())} events \u00b7 {fmt_time(tail[-1].get('ts'))} \u00b7 "
         f"`{LOG_PATH}`"
     )
