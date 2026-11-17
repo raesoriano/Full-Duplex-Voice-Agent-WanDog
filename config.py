@@ -254,11 +254,35 @@ MCP_TOOL_TIMEOUT = float(os.environ.get("FWEDDIE_MCP_TOOL_TIMEOUT", 320))
 MCP_APPROVAL_TIMEOUT = float(os.environ.get("FWEDDIE_MCP_APPROVAL_TIMEOUT", 120))
 # How much of a tool result the MODEL is allowed to see, in characters.
 # The full result is kept for the dashboard and the session folder; only this
-# much is handed back to the LLM. A 600-char JSON blob of URLs and article text
-# is a poor thing to ask a speech-first model to summarise, and the voice reply
-# is one or two sentences, so the head of the result is enough to speak from.
+# much is handed back to the LLM. The voice reply is one or two sentences, so
+# the model needs a couple of results, not a wall of JSON.
+#
+# The cap is applied STRUCTURALLY by mcp_bridge._cap_for_model: a JSON list
+# keeps whole results and says how many were dropped, instead of being cut
+# mid-string. A blind slice at 600 chars turned a 5-result news payload into
+# 1.6 broken results -- the model got a title and a dangling fragment, and
+# could not see the `date` field it needed to tell old news from new.
+#
 # 0 disables the cap (the old behaviour).
-MCP_MODEL_RESULT_CHARS = int(os.environ.get("FWEDDIE_MCP_MODEL_RESULT_CHARS", 600))
+MCP_MODEL_RESULT_CHARS = int(os.environ.get("FWEDDIE_MCP_MODEL_RESULT_CHARS", 1200))
+
+# Search retries. OnIt's news branch calls ddgs once and turns any exception
+# into {"error": "Search failed: No results found."} -- ddgs RAISES rather than
+# returning an empty list when its aggregator is rate-limited, which measured
+# at roughly 2 failures in 8 calls. The web branch already retries 3x inside
+# OnIt; the news branch never got that fix. We cannot change OnIt here, so the
+# bridge retries the call itself. Only read-only `search` calls are retried:
+# a retried `bash` or `write_file` could run twice.
+MCP_SEARCH_RETRIES = int(os.environ.get("FWEDDIE_MCP_SEARCH_RETRIES", 3))
+MCP_SEARCH_RETRY_DELAY = float(os.environ.get("FWEDDIE_MCP_SEARCH_RETRY_DELAY", 1.5))
+
+# Should a recency-shaped search be sent as type="news" even when the model
+# said nothing about it? Measured over 13 real `search` calls in
+# /tmp/fweddie_events.jsonl: the model passed no `type` argument once, so
+# every call hit the general index, whose results carry NO date. The tool
+# description does tell it to use "news" for recency -- it does not do it.
+# This is the deterministic backstop. Set to 0 to let the model decide alone.
+MCP_NEWS_AUTODETECT = os.environ.get("FWEDDIE_MCP_NEWS_AUTODETECT", "1") == "1"
 
 # ---------------------------------------------------------------------------
 # Dashboard (Streamlit, reachable from other devices on the LAN)
@@ -289,6 +313,22 @@ SYSTEM_PROMPT = (
 
 # Appended to the system prompt only when the tool bridge is active, so the
 # model knows it has tools and how to use them.
+#
+# The date line is added at call time by ``tools_system_prompt()`` rather than
+# baked in here: a module-level constant would freeze whatever day the process
+# imported it on, and a long-running agent would then believe it is still that
+# day. Without a date the model cannot judge "latest" at all -- the search tool
+# description tells it to use type="news" when recency matters, but it has no
+# way to know what "recent" means.
+# The rule that stops the model inventing a clock time. Defined before
+# TOOLS_SYSTEM_PROMPT because that string is built from it, and kept as its own
+# constant so it can also apply when the bridge is off: an agent with no tools
+# has a clock in its prompt but no `date` to run, and it still must not fill the
+# gap from memory.
+CLOCK_GUARD = (
+    "Never state a clock time you have not been given or read from a tool."
+)
+
 TOOLS_SYSTEM_PROMPT = (
     "You have tools you can call to act: run shell commands, read and write "
     "files, search the web and local documents, and check the weather. "
@@ -300,8 +340,71 @@ TOOLS_SYSTEM_PROMPT = (
     "tells you it needs approval, say briefly that you are asking a person, "
     "then wait for the tool to finish -- do not retry it, do not rephrase it, "
     "and do not try another route around it. If the person declines, say so "
-    "and move on."
+    "and move on. "
+    # Recency guidance. This is the half of the fix that lives in the prompt;
+    # the other half is config.MCP_NEWS_AUTODETECT, which sets the argument
+    # when the model forgets it. Both were missing, and the event log shows
+    # the model never passed `type` on its own in 13 out of 13 calls.
+    "For anything about news, current events, prices, scores, or 'the latest' "
+    "or 'who won', search with type set to news so the results carry dates. "
+    "Prefer the most recent result and mention its date when you speak. If a "
+    "result looks older than the question asks for, say so instead of "
+    "presenting it as current. Never call a result 'the latest' unless its "
+    "date supports that. "
+    # Clock guidance. The date line in ``clock_line()`` is what broke the
+    # clock: it says "Today is Tuesday, 17 November 2026", and a model holding
+    # a date with no time will happily invent one -- measured at 3 out of 3
+    # trials on "What is the time?", answering 11:44 AM, 1:15 PM, 11:38 AM in
+    # three consecutive calls, never touching the bash tool it had been using
+    # for the same question before the date line existed. The line below is
+    # what stops the invention; ``clock_line()`` supplies the real value.
+    "Never state a clock time you have not been given or read from a tool. "
+    "For a time in another city or timezone, run `date` with the bash tool "
+    "and a TZ prefix -- for example TZ=\"America/Anchorage\" date -- and read "
+    "the time from its output."
 )
+
+
+def clock_line() -> str:
+    """One line stating the real date AND time, to put in front of the model.
+
+    Both halves matter, and the first version of this shipped only one. A date
+    with no clock reads to the model as "you know what time it is", so it
+    fills the gap: the event log has it answering "It is currently Tuesday,
+    November 17, 2026" to "What is the time?", and after the date line landed
+    it answered "The current time is 12:00 PM" -- a value it was never given.
+
+    Measured against the real toolset, 3 trials per question:
+
+        prompt                      "What is the time?"   bash calls
+        date only (0850bb2a)        invented a time       9/12
+        date + clock, no hint       correct, no tool      12/12
+        date + clock + hint above   correct, no tool      12/12
+
+    The clock is re-read on every call, so a long-running agent cannot drift.
+    It is the local zone: ``datetime.now().astimezone()`` follows /etc/localtime,
+    which is what a person standing in front of the mic means by "the time".
+    """
+    from datetime import datetime
+    now = datetime.now().astimezone()
+    return (
+        f"The current date and time here is "
+        f"{now.strftime('%A, %d %B %Y, %I:%M %p')} "
+        f"({now.tzname()}, UTC{now.strftime('%z')}). "
+    )
+
+
+def tools_system_prompt() -> str:
+    """The tools section of the system prompt, with the current date and time.
+
+    Call this once per pipeline build, not once per import: a module-level
+    constant would freeze whatever moment the process imported it on, and a
+    long-running agent would then believe it is still that moment. Without a
+    date the model cannot judge "latest" at all -- the search tool description
+    tells it to use type="news" when recency matters, but it has no way to
+    know what "recent" means.
+    """
+    return clock_line() + TOOLS_SYSTEM_PROMPT
 
 
 def _ensure_dbus_session() -> None:
@@ -414,12 +517,26 @@ TOOL_SECRETS_PATH = Path(
 
 # keyring key -> env var the tool server actually reads. The left side is the
 # name OnIt stores under; the right side is what the server consults.
+#
+# `ollama_api_key` is deliberately NOT forwarded. OnIt's search chain is Tavily
+# -> DuckDuckGo only (web_search.py:180-213); it has no Ollama tier, so the key
+# bought nothing there. Ollama's web search is metered per call, so a key that
+# is merely present is a liability: any server that reads OLLAMA_API_KEY would
+# start spending on the first search. The key stays in secrets.yaml because the
+# LLM endpoint uses it via ONIT_LLM_BASE_URL; it is never handed to a tool
+# server.
 TOOL_SECRETS: dict[str, str] = {
     "openweathermap_api_key": "OPENWEATHERMAP_API_KEY",  # get_weather
     "tavily_api_key": "TAVILY_API_KEY",                  # search, first tier
-    "ollama_api_key": "OLLAMA_API_KEY",                  # search, second tier
     "github_token": "GITHUB_TOKEN",                      # github_repo, git push
     "huggingface_token": "HF_TOKEN",                     # model downloads
+}
+
+# Secrets we refuse to forward even if a future TOOL_SECRETS entry names them.
+# Separate from the map so the reason survives, and so a test can assert it.
+FORBIDDEN_TOOL_SECRETS: dict[str, str] = {
+    "ollama_api_key": "Ollama web search is metered per call; never expose it "
+                      "to a tool server",
 }
 
 _secrets_cache: dict | None = None
@@ -515,6 +632,8 @@ def tool_secret_env() -> dict[str, str]:
     """
     resolved: dict[str, str] = {}
     for name, env_var in TOOL_SECRETS.items():
+        if name in FORBIDDEN_TOOL_SECRETS:
+            continue
         value = resolve_tool_secret(name)
         if value:
             resolved[env_var] = value

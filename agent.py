@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -226,6 +227,64 @@ class PartialTranscriptTap(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+class ClockedLLMService(OpenAILLMService):
+    """An OpenAI-compatible LLM service that re-reads the clock per inference.
+
+    The system prompt carries the current date and time (see
+    ``config.clock_line``). Building it once in ``build_pipeline`` is not
+    enough: this agent runs for hours, so a prompt composed at startup tells
+    the model the time the agent was launched, and "what time is it" answers
+    with a stale clock -- which is the same class of bug as inventing one, and
+    harder to notice.
+
+    ``get_chat_completions`` is the one call every inference passes through
+    (``_process_context`` builds its request there and nowhere else), so the
+    clock is refreshed there. Only the clock sentence is replaced; the rest of
+    the prompt is a constant and is not rebuilt.
+
+    Why not a runtime ``LLMUpdateSettingsFrame`` per turn: that would need a
+    frame injected before each user turn, and the clock would then be a turn
+    behind whenever the turn boundary moved (barge-in, a speculative turn that
+    is confirmed). Overriding here cannot drift.
+    """
+
+    # Matches the clock sentence wherever it sits in the prompt. The persona
+    # comes first and the clock sits inside the tools section, so this cannot
+    # be a startswith/prefix swap -- a prefix swap would prepend a second
+    # clock line and leave the stale one in the middle, growing the prompt on
+    # every turn.
+    _CLOCK_RE = re.compile(
+        r"The current date and time here is .*?\([^()]*UTC[+-]\d{4}\)\. "
+    )
+
+    async def get_chat_completions(self, context):
+        self._refresh_clock()
+        return await super().get_chat_completions(context)
+
+    def _refresh_clock(self) -> None:
+        """Replace the clock sentence in the system instruction with a fresh one."""
+        current = self._settings.system_instruction
+        if not isinstance(current, str):
+            return
+        fresh = config.clock_line()
+        if self._CLOCK_RE.search(current):
+            updated = self._CLOCK_RE.sub(lambda _m: fresh, current, count=1)
+        else:
+            # No clock to replace (a prompt built by something else, or the
+            # guard fired before build_pipeline composed one). Insert the clock
+            # after the persona rather than in front of it, and keep the rest
+            # of the prompt as it stands instead of rebuilding from config --
+            # rebuilding would discard any instruction a caller had added.
+            updated = (config.SYSTEM_PROMPT + " " + fresh + current[len(config.SYSTEM_PROMPT):].lstrip()
+                       if current.startswith(config.SYSTEM_PROMPT)
+                       else fresh + current)
+        if updated != current:
+            self._settings.system_instruction = updated
+            # The base prompt is the snapshot composition rebuilds from; if it
+            # is not updated the next _compose_system_instruction reverts us.
+            self._base_system_instruction = updated
+
+
 def wire_transcript_events(user_agg, assistant_agg, bus) -> None:
     """Record the user's words and the bot's reply on the event bus.
 
@@ -367,7 +426,12 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     )
 
     # --- LLM (OnIt, OpenAI-compatible, raw-audio input) --------------------
-    system_prompt = config.SYSTEM_PROMPT
+    # The clock goes in even without the bridge. Before this, the whole prompt
+    # extension was gated on tools, so an agent with tools off had no date and
+    # no time AND no bash to read them with -- it could only say it did not
+    # know. The clock is one line and answers "what time is it" by itself.
+    system_prompt = (config.SYSTEM_PROMPT + " " + config.clock_line()
+                     + " " + config.CLOCK_GUARD).strip()
     if bridge is not None:
         system_prompt = (system_prompt + " " + config.TOOLS_SYSTEM_PROMPT).strip()
     llm_settings: dict = dict(
@@ -384,7 +448,7 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         llm_settings["extra"] = {
             "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}
         }
-    llm = OpenAILLMService(
+    llm = ClockedLLMService(
         api_key=api_key,
         base_url=config.LLM_BASE_URL,
         settings=OpenAILLMService.Settings(**llm_settings),
@@ -474,7 +538,14 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     # exactly the "it answers the previous question" symptom. Tools went to
     # the assistant context too, so the model was also told nothing about
     # them. One shared context fixes both.
-    context_kwargs = {"messages": [{"role": "system", "content": system_prompt}]}
+    # The prompt lives on the LLM service's `system_instruction`, NOT in the
+    # context. Putting it in both sends it TWICE: the adapter prepends the
+    # settings copy and keeps the context copy, so every request carried two
+    # identical 1400-char system messages (measured -- see test_clock.py).
+    # Pipecat warns about exactly this and calls the context copy deprecated.
+    # It also made the clock unfixable: the stale copy in the context would
+    # have shadowed any refresh of the settings one.
+    context_kwargs = {"messages": []}
     if bridge is not None and bridge.tools:
         context_kwargs["tools"] = bridge.tools
     context = LLMContext(**context_kwargs)

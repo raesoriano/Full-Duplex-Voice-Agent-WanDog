@@ -142,13 +142,28 @@ and applies to every tool call. Three layers:
    `approval_scope`). A refusal is remembered for the session so the model
    cannot retry it. Fail-closed: no answer within `MCP_APPROVAL_TIMEOUT` = deny.
 
-**Web search** (`search` tool, 'net' profile). Ollama ended its free cloud
-web-search API, so OnIt's search chain no longer has an ollama tier: it is now
-Tavily (only when `TAVILY_API_KEY` is set) -> DuckDuckGo (`ddgs`, free, no
-key). DuckDuckGo intermittently returns "No results found" under load, so
-`_search_ddgs` retries up to 3 times with a 1s pause. Verified live over MCP:
-`test_search_live.py` spawns the real 'net' server and checks `search`
-returns results for both `type="web"` and `type="news"`.
+**Web search** (`search` tool, 'net' profile). OnIt's search chain is Tavily
+(only when `TAVILY_API_KEY` is set) -> DuckDuckGo (`ddgs`, free, no key). There
+is no Ollama tier: `ollama_api_key` is deliberately not forwarded to the tool
+servers (`config.FORBIDDEN_TOOL_SECRETS`), because Ollama's web search is
+metered per call and the chain never used it. DuckDuckGo intermittently returns
+"No results found" under load, so `_search_ddgs` retries up to 3 times with a
+1s pause. Verified live over MCP: `test_search_live.py` spawns the real 'net'
+server and checks `search` returns results for both `type="web"` and
+`type="news"`.
+
+**Result size cap** (`mcp_bridge._cap_for_model`). The model sees at most
+`MCP_MODEL_RESULT_CHARS` (1200) of any tool result; the full text still goes to
+the dashboard and the session folder. A web search returns full page bodies, so
+five results are 5400-7800 chars and *no single result* fits the cap. Until the
+fix, the cap dropped all five and the model received
+`{"results": [], "note": "all 5 results were too large to show"}` — an empty
+answer to a question the server had answered, which is why the agent re-asked
+"CES 2025 dates" four times. The cap now clips the prose inside each result
+(keeping title, url, date and source intact) and clips *around the passage that
+matches the query*, not blindly from the front. Measured on 12 real queries:
+0 empty payloads, and the answer text present in what the model sees 12/12
+(previously 4 of 5 web searches came back empty).
 
 The two env vars `mcp_bridge` sets when spawning the servers are what make the
 safeguards actually fire (without them every ask collapses to a hard deny):

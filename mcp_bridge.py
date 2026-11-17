@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -283,20 +284,297 @@ def _announcement(tool_name: str) -> str:
     return _ANNOUNCEMENTS.get(tool_name, "One moment.")
 
 
-def _cap_for_model(text: str, limit: int) -> str:
+# Words that mean the answer is time-sensitive. Used only to fill in a missing
+# `type` argument on a `search` call -- never to override one the model set.
+# Deliberately narrow: "news", "latest", "today" and the like. A false positive
+# costs one dated search instead of an undated one, which is the cheaper error.
+_RECENCY_WORDS = (
+    "news", "latest", "today", "tonight", "yesterday", "this week",
+    "this morning", "right now", "currently", "current", "recent",
+    "recently", "breaking", "headline", "headlines", "update", "updates",
+    "who won", "election", "score", "scores", "price", "prices", "stock",
+    "stocks", "weather", "forecast", "just happened", "newest",
+)
+
+
+def _looks_time_sensitive(query: str) -> bool:
+    """Does this query need dated results?"""
+    q = " ".join((query or "").lower().split())
+    if not q:
+        return False
+    return any(w in q for w in _RECENCY_WORDS)
+
+
+def _shape_search_args(args: dict) -> dict:
+    """Fill in ``type="news"`` when the query is clearly about recency.
+
+    The model has the tool description in front of it and still passed no
+    `type` on 13 out of 13 real searches, so every one hit the general index,
+    which returns no dates at all. This is the deterministic half of the fix:
+    an argument the model omitted is supplied here.
+
+    Note which case this can and cannot see. The tool schema declares
+    ``type: {default: "web"}``, and Pipecat fills defaults in from the
+    signature, so by the time the handler runs, ``args["type"] == "web"``
+    whether the model chose it or said nothing at all. Those two are
+    indistinguishable here, so "web" is treated as "unspecified" and a
+    recency-shaped query is upgraded. Only an explicit non-web choice --
+    ``"news"`` itself, or anything else the server later adds -- is left alone.
+    """
+    if not config.MCP_NEWS_AUTODETECT:
+        return args
+    if not isinstance(args, dict):
+        return args
+    if "type" in args and args.get("type") not in (None, "", "web"):
+        return args          # an explicit, non-default choice; respect it
+    if not _looks_time_sensitive(args.get("query") or ""):
+        return args
+    shaped = dict(args)
+    shaped["type"] = "news"
+    # Five is the news branch's useful ceiling for a spoken answer; a bigger
+    # number only pushes more of the payload past the model's cap.
+    try:
+        if int(shaped.get("max_results") or 0) < 3:
+            shaped["max_results"] = 5
+    except (TypeError, ValueError):
+        shaped["max_results"] = 5
+    return shaped
+
+
+def _search_failed(text: str) -> bool:
+    """Did a `search` call come back as an error object?"""
+    if not isinstance(text, str):
+        return False
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return False
+    try:
+        data = json.loads(stripped)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(data, dict) and bool(data.get("error"))
+
+
+def _cap_for_model(text: str, limit: int, query: Optional[str] = None) -> str:
     """Return the part of a tool result the LLM is allowed to see.
 
     The voice reply is one or two sentences, so the model needs the head of the
-    result, not all of it. Keeping the head and naming the remainder tells the
-    model what it is missing without asking it to digest a wall of JSON. The
-    full text is untouched: it goes to the dashboard and the session folder.
+    result, not all of it -- but it needs a *parseable* head. A blind
+    ``text[:limit]`` slice lands mid-string, so a 5-result news payload came
+    back as one title plus a dangling fragment and the model could not see the
+    ``date`` field of any result. That is the difference between "the search
+    gave me old news" and "the search gave me nothing I can read".
 
-    ``limit <= 0`` disables the cap.
+    So the cap is structural where the result is a JSON list (which is what
+    every OnIt search returns): whole results are kept, the count of dropped
+    results is stated, and the text stays valid JSON. Anything else -- plain
+    text, a dict, a malformed payload -- falls back to the old head-slice,
+    which is right for a file read or a shell transcript.
+
+    ``query`` is the search that produced the result. When a result has to be
+    shortened, the passage matching the question is kept instead of only the
+    opening -- see ``_cap_best_window``.
+
+    The full text is untouched: it goes to the dashboard and the session
+    folder. ``limit <= 0`` disables the cap.
     """
     if limit <= 0 or len(text) <= limit:
         return text
+
+    capped = _cap_json_list(text, limit, query)
+    if capped is not None:
+        return capped
+
     return (text[:limit].rstrip()
             + f"\n[truncated: showing {limit} of {len(text)} chars]")
+
+
+# Fields that stay whole however tight the budget gets. A voice model needs the
+# url to cite a result and the date to tell old news from new; cutting either
+# costs it the very thing it searched for, and neither is the bulky field.
+_CAP_KEEP_INTACT = frozenset({
+    "url", "link", "href", "title", "date", "published", "published_date",
+    "source", "id", "name", "type", "error",
+})
+
+# How much prose to keep per result, tried in order. ``None`` means "try whole
+# results first", so a payload that already fits is passed through untouched:
+# news results are short and must not be abbreviated needlessly.
+_CAP_CLIP_LADDER = (None, 700, 500, 350, 250, 180, 120, 80, 50)
+
+# Words too common to identify the passage that answers a question.
+_CAP_STOPWORDS = frozenset(
+    "a an the is are was were be been being what when where who whom whose why "
+    "how does do did doing of in on at to for from by with about into over after "
+    "and or but if then than that this these those it its i you we they he she "
+    "me my your our their there here can could should would will shall may might "
+    "please tell give show find latest new news".split()
+)
+
+# Share of the budget given to the opening of a passage before the window that
+# matches the question starts. A page's first lines are its title and nav; the
+# answer is usually a paragraph or two in.
+_CAP_HEAD_SHARE = 0.4
+
+
+def _cap_terms(query: Optional[str]) -> list:
+    """The content words of a query, for locating the passage that answers it."""
+    if not query:
+        return []
+    words = re.findall(r"[a-z0-9]+", str(query).lower())
+    return [w for w in words if len(w) > 1 and w not in _CAP_STOPWORDS]
+
+
+def _cap_best_window(text: str, terms: list, size: int):
+    """Start of the ``size``-char window holding the most query terms.
+
+    A prefix is the wrong shape for a web result: the first 250 chars of a CES
+    page are "About CES: CES is the most powerful tech event in the world...",
+    while "CES 2025 takes place Jan. 7-10, 2025, in Las Vegas" sits at char 388.
+    The model was given the boilerplate and asked again. So the clip keeps the
+    opening *and* jumps to the densest passage for the question's own words.
+    """
+    if not terms or len(text) <= size:
+        return 0
+    low = text.lower()
+    hits = sorted(m.start() for t in terms for m in re.finditer(re.escape(t), low))
+    if not hits:
+        return 0
+    best, best_hits = hits[0], -1
+    for h in hits:
+        n = sum(1 for x in hits if h <= x < h + size)
+        if n > best_hits:
+            best_hits, best = n, h
+    # Start a little before the first matching term so the sentence is whole.
+    return max(0, min(best - size // 4, len(text) - size))
+
+
+def _cap_clip(value, clip: int, terms: Optional[list] = None):
+    """Shrink the prose inside a result, leaving identity fields whole."""
+    if isinstance(value, str):
+        if len(value) <= clip:
+            return value
+        if terms:
+            head = max(40, int(clip * _CAP_HEAD_SHARE))
+            start = _cap_best_window(value, terms, clip - head)
+            # Only jump when the window is actually past the head; otherwise the
+            # two pieces would overlap and repeat the same sentence.
+            if start > head:
+                return (value[:head].rstrip() + " \u2026 "
+                        + value[start:start + clip - head].strip() + "\u2026")
+        return value[:clip].rstrip() + "\u2026"
+    if isinstance(value, list):
+        return [_cap_clip(v, clip, terms) for v in value]
+    if isinstance(value, dict):
+        return {k: (v if k in _CAP_KEEP_INTACT else _cap_clip(v, clip, terms))
+                for k, v in value.items()}
+    return value
+
+
+def _cap_json_list(text: str, limit: int, query: Optional[str] = None) -> Optional:
+    """Fit a JSON list into ``limit`` chars without ever emptying it.
+
+    Two stages, because there are two different reasons a payload is too big:
+
+    1. **Too many results.** Drop whole results from the tail and say how many
+       were dropped. This is the news shape -- a handful of short, dated
+       results -- and it is the only stage the cap used to have.
+    2. **Each result is too big.** A web search returns full page bodies
+       (~1000-1600 chars each), so five results is 5400-7800 chars and *not
+       one* fits under the cap. Stage 1 alone therefore dropped all five and
+       handed the model ``{"results": [], "note": "all 5 results were too large
+       to show"}`` -- an empty answer to a question the server had answered.
+       That is why the model re-asked "CES 2025 dates" four times: it was
+       reading an empty list, not a stale one.
+
+    Stage 2 clips the prose inside each result while keeping titles, urls,
+    dates and sources intact, and clips around the passage that matches
+    ``query`` rather than blindly from the front. The model gets at least one
+    result whenever the server returned one, and the note says the text was cut
+    so it knows the snippet is abbreviated rather than whole.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("["):
+        return None
+    try:
+        items = json.loads(stripped)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(items, list) or not items:
+        return None
+
+    total = len(items)
+    terms = _cap_terms(query)
+
+    def render(keep: int, clip: Optional[int]) -> str:
+        if keep >= total and clip is None:
+            return json.dumps(items, ensure_ascii=False)
+        shown = items[:keep]
+        if clip is not None:
+            shown = [_cap_clip(item, clip, terms) for item in shown]
+        note = f"showing {keep} of {total} results"
+        if keep < total:
+            note += f"; {total - keep} dropped to fit the model's context"
+        if clip is not None:
+            note += (f"; each result's text is cut to {clip} chars, while its "
+                     f"title, url and date are intact")
+        # The trailer is deliberately plain: a voice model reads it as a
+        # sentence ("showing 2 of 5 results"), not as another result object.
+        return json.dumps(
+            {"results": shown, "showing": keep, "total": total, "note": note},
+            ensure_ascii=False,
+        )
+
+    # Items vary in size, so walk down from the full list rather than assuming
+    # an average. Collect every (clip, keep) that fits instead of taking the
+    # first one: the first fit is always the *longest* text, which means one
+    # result quoted at 700 chars rather than three at 250. For a voice answer
+    # that is the wrong trade -- two independent sources beat one long one --
+    # so the choice is made explicitly below.
+    options = []
+    for clip in _CAP_CLIP_LADDER:
+        for keep in range(total, 0, -1):
+            out = render(keep, clip)
+            if len(out) <= limit:
+                options.append((keep, clip, out))
+                break
+
+    if options:
+        # Prefer a configuration that keeps at least two results, and among
+        # those prefer the least clipping (largest clip, then most results).
+        # A news payload that already fits is chosen here untouched, because
+        # clip=None is the largest clip and it keeps its usual 2-3 results.
+        def rank(o):
+            return (o[1] if o[1] is not None else 10 ** 6, o[0])
+
+        many = [o for o in options if o[0] >= 2]
+        return max(many or options, key=rank)[2]
+
+    # Even one result clipped to the shortest step will not fit, which means
+    # the identity fields themselves (a long url, a long title) blow the budget.
+    # Give the model the first result's skeleton rather than an empty list.
+    skeleton = [
+        {k: v for k, v in item.items() if k in _CAP_KEEP_INTACT}
+        if isinstance(item, dict) else item
+        for item in items[:1]
+    ]
+    out = json.dumps(
+        {"results": skeleton, "showing": 1, "total": total,
+         "note": f"only the first of {total} results fits within {limit} chars, "
+                 f"and only its title, url, date and source; the body text was "
+                 f"dropped"},
+        ensure_ascii=False,
+    )
+    if len(out) <= limit:
+        return out
+    # A single result's identity alone is over budget (a very long url). Say so
+    # with a valid answer that still states a result existed.
+    return json.dumps(
+        {"results": [], "showing": 0, "total": total,
+         "note": f"the first result alone is larger than {limit} chars (its url "
+                 f"and title), so no result could be shown"},
+        ensure_ascii=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -593,9 +871,17 @@ class ToolBridgeProcessor(FrameProcessor):
             # silence during that time reads as "it stopped working". This is a
             # fixed phrase on purpose: it must not depend on the model.
             await self._say(_announcement(name))
+            call_args = dict(kwargs)
+            if name == "search":
+                call_args = _shape_search_args(call_args)
             try:
+                # One deadline for the whole call, retries included. Wrapping
+                # only the individual attempt would let a 3-attempt search hold
+                # a voice turn for 3x MCP_TOOL_TIMEOUT, which is minutes of
+                # silence -- the very failure the spoken announcement exists to
+                # avoid.
                 text = await asyncio.wait_for(
-                    self.guard.handle(name, kwargs, server, server.call_tool),
+                    self._call_with_search_retry(name, call_args, server),
                     timeout=config.MCP_TOOL_TIMEOUT,
                 )
             except asyncio.TimeoutError:
@@ -606,11 +892,12 @@ class ToolBridgeProcessor(FrameProcessor):
                 text = f"[tool error] {name}: {e}"
 
             full = text if isinstance(text, str) else str(text)
-            # Layer 3: the model sees a bounded head of the result; the full
-            # text stays in the session folder and on the dashboard. This is
-            # what keeps a huge MCP payload from being the thing that decides
-            # whether the agent speaks.
-            model_text = _cap_for_model(full, config.MCP_MODEL_RESULT_CHARS)
+            # Layer 3: the model sees a bounded, parseable head of the result;
+            # the full text stays in the session folder and on the dashboard.
+            # This is what keeps a huge MCP payload from being the thing that
+            # decides whether the agent speaks.
+            model_text = _cap_for_model(full, config.MCP_MODEL_RESULT_CHARS,
+                                        query=call_args.get("query"))
 
             # Layer 1: make the tool turn observable. The event log used to
             # record the result but not what happened next, which is why the
@@ -632,6 +919,35 @@ class ToolBridgeProcessor(FrameProcessor):
         _handler.__onit_schema__ = schema  # type: ignore[attr-defined]
         _handler.__onit_server__ = server.name  # type: ignore[attr-defined]
         return _handler
+
+    async def _call_with_search_retry(self, name: str, call_args: dict,
+                                      server) -> str:
+        """Run a tool, retrying a failed ``search`` a bounded number of times.
+
+        OnIt's news branch calls ddgs once and converts any exception into
+        ``{"error": "Search failed: ..."}``. ddgs *raises* rather than returning
+        ``[]`` when its aggregator is rate-limited, measured at roughly 2
+        failures in 8 news searches. The web branch already retries three times
+        inside OnIt; the news branch never got that fix, and we are not editing
+        OnIt, so the retry lives here.
+
+        Only ``search`` is retried. It is read-only, so a second attempt cannot
+        run a command twice -- a retried ``bash`` or ``write_file`` could.
+        """
+        text = await self.guard.handle(name, call_args, server, server.call_tool)
+        if name != "search":
+            return text
+
+        attempts = max(1, config.MCP_SEARCH_RETRIES)
+        for attempt in range(1, attempts):
+            if not _search_failed(text):
+                return text
+            logger.info("Search failed ({}), retry {}/{}",
+                        str(text)[:120], attempt, attempts - 1)
+            await asyncio.sleep(config.MCP_SEARCH_RETRY_DELAY * attempt)
+            text = await self.guard.handle(name, call_args, server,
+                                           server.call_tool)
+        return text
 
     async def close(self) -> None:
         for server in self.servers:
