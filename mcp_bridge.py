@@ -653,9 +653,11 @@ def _cap_for_model(text: str, limit: int, query: Optional[str] = None) -> str:
     capped = _cap_json_list(text, limit, query)
     if capped is not None:
         return capped
+    capped = _cap_json_obj(text, limit, query)
+    if capped is not None:
+        return capped
 
-    return (text[:limit].rstrip()
-            + f"\n[truncated: showing {limit} of {len(text)} chars]")
+    return _cap_head_slice(text, limit)
 
 
 # Fields that stay whole however tight the budget gets. A voice model needs the
@@ -738,6 +740,121 @@ def _cap_clip(value, clip: int, terms: Optional[list] = None):
         return {k: (v if k in _CAP_KEEP_INTACT else _cap_clip(v, clip, terms))
                 for k, v in value.items()}
     return value
+
+
+def _cap_json_obj(text: str, limit: int, query: Optional = None) -> Optional:
+    """Fit a JSON **dict** into ``limit`` chars without breaking the JSON.
+
+    The list path below covers every ``search`` result. It does not cover the
+    other tools, and that gap is a live defect: ``local_search``, ``grep``,
+    ``read_file``, ``search_document`` and ``get_weather`` all return a dict,
+    and a dict fell through to the blind head-slice, which cut the JSON
+    mid-string. Measured on the four shapes the model can actually receive:
+
+        local_search     1718 chars -> 1240 chars of INVALID JSON
+        read_file       12094 chars -> 1241 chars of INVALID JSON
+        grep             3990 chars -> 1240 chars of INVALID JSON
+        search_document  2828 chars -> 1240 chars of INVALID JSON
+
+    The model cannot parse any of those, so a dict-shaped result is worth
+    nothing at all once it exceeds the cap -- the same failure as the empty
+    ``{"results": []}`` this cap was written to stop, just for the other tools.
+    It stayed invisible because the event log has only ``search``,
+    ``get_weather`` and ``bash`` calls in it: the payloads that break are the
+    ones the agent has not happened to use yet.
+
+    So a dict is capped structurally too: the bulkiest list field loses whole
+    records from its tail, prose is clipped inside the records that remain, and
+    the note says how many were dropped. Identity fields stay whole, as above.
+    ``None`` means "not a JSON dict" -- the caller then falls back to text.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        obj = json.loads(stripped)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+
+    terms = _cap_terms(query)
+
+    # The bulk of a dict payload is a list of records, so that is what gets
+    # trimmed. Pick the biggest one by rendered size, not item count: one
+    # `documents` entry carries an `opening` several times the size of a
+    # `results` chunk.
+    list_keys = [k for k, v in obj.items() if isinstance(v, list) and v]
+    list_keys.sort(
+        key=lambda k: len(json.dumps(obj[k], ensure_ascii=False)), reverse=True)
+    biggest = list_keys[0] if list_keys else None
+    total = len(obj[biggest]) if biggest else 0
+
+    def render(clip: Optional, keep: Optional) -> str:
+        out = {}
+        dropped = 0
+        for k, v in obj.items():
+            if biggest and k == biggest and keep is not None and isinstance(v, list):
+                dropped = len(v) - keep
+                v = v[:keep]
+            if clip is not None:
+                v = _cap_clip(v, clip, terms)
+            out[k] = v
+        if dropped > 0:
+            # Totals are left as the server reported them: they are true, and
+            # the note is what explains why fewer records are visible.
+            out["note"] = (f"showing {keep} of {total} {biggest}; "
+                           f"{dropped} dropped to fit the model's context")
+        elif clip is not None:
+            out["note"] = (f"each text field is cut to {clip} chars to fit the "
+                           f"model's context; urls, dates and counts are intact")
+        return json.dumps(out, ensure_ascii=False)
+
+    options = []
+    for clip in _CAP_CLIP_LADDER:
+        keeps = range(total, 0, -1) if biggest else [None]
+        for keep in keeps:
+            out = render(clip, keep)
+            if len(out) <= limit:
+                options.append((keep or 0, clip, out))
+                break
+
+    if options:
+        # Same preference as the list path: two records beat one long one, and
+        # among equals the least clipping wins.
+        def rank(o):
+            return (o[1] if o[1] is not None else 10 ** 6, o[0])
+
+        many = [o for o in options if o[0] >= 2]
+        return max(many or options, key=rank)[2]
+
+    # Nothing fit even with the tightest clip. Return a valid object that still
+    # names the tool's own keys, so the model can say what it did get rather
+    # than reading half a string.
+    return json.dumps(
+        {"note": f"the result was {len(text)} chars and no part of it fits "
+                 f"within {limit} chars; its fields were {sorted(obj)[:8]}"},
+        ensure_ascii=False,
+    )
+
+
+def _cap_head_slice(text: str, limit: int) -> str:
+    """Last resort for plain text: a head slice, marked as truncated.
+
+    Right for a shell transcript or a file body, where the opening is what the
+    model can use. It must never be applied to JSON -- that is what the two
+    structural caps above exist to prevent -- so it stays a separate function
+    rather than an inline fallback, and the caller reaches it only after both
+    JSON paths have declined.
+
+    Measured limit: the tail is lost. ``bash`` output whose verdict is on the
+    last line (a test summary, ``git status``) is not readable through this.
+    Not fixed here because it does not bite this workload yet: in the 62-call
+    event log every ``bash`` result was 140-172 chars, well under the cap. If a
+    long command output ever needs its tail, this is the function to change.
+    """
+    return (text[:limit].rstrip()
+            + f"\n[truncated: showing {limit} of {len(text)} chars]")
 
 
 def _cap_json_list(text: str, limit: int, query: Optional[str] = None) -> Optional:
@@ -836,12 +953,38 @@ def _cap_json_list(text: str, limit: int, query: Optional[str] = None) -> Option
     )
     if len(out) <= limit:
         return out
-    # A single result's identity alone is over budget (a very long url). Say so
-    # with a valid answer that still states a result existed.
+    # A single result's identity alone is over budget. That used to end in
+    # ``{"results": []}`` -- an empty list, which is precisely the failure the
+    # two-stage cap was written to remove, just reachable only by a 1200+ char
+    # url or title (measured: a 2000-char url produced "no result could be
+    # shown" for a payload holding one real result). Empty is the wrong answer
+    # when the server did return something, so clip the identity fields too and
+    # keep the result recognisable instead.
+    for ident_clip in (600, 300, 150, 80, 40):
+        skeleton = []
+        for item in items[:1]:
+            if not isinstance(item, dict):
+                skeleton.append(str(item)[:ident_clip])
+                continue
+            skeleton.append({
+                k: (v[:ident_clip].rstrip() + "\u2026"
+                    if isinstance(v, str) and len(v) > ident_clip else v)
+                for k, v in item.items() if k in _CAP_KEEP_INTACT
+            })
+        out = json.dumps(
+            {"results": skeleton, "showing": 1, "total": total,
+             "note": f"only the first of {total} results fits within {limit} "
+                     f"chars, and its url and title are cut to {ident_clip} "
+                     f"chars; the body text was dropped"},
+            ensure_ascii=False,
+        )
+        if len(out) <= limit:
+            return out
+    # Only reachable if the budget is smaller than the wrapper itself, i.e. a
+    # limit of a few dozen chars. Still not an empty list: name the count.
     return json.dumps(
-        {"results": [], "showing": 0, "total": total,
-         "note": f"the first result alone is larger than {limit} chars (its url "
-                 f"and title), so no result could be shown"},
+        {"showing": 0, "total": total,
+         "note": f"the first result's title and url alone exceed {limit} chars"},
         ensure_ascii=False,
     )
 

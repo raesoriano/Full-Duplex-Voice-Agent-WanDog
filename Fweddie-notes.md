@@ -165,6 +165,47 @@ matches the query*, not blindly from the front. Measured on 12 real queries:
 0 empty payloads, and the answer text present in what the model sees 12/12
 (previously 4 of 5 web searches came back empty).
 
+**The cap only covered half the tools** (`_cap_json_obj`). The structural cap
+above handled a JSON *list*, which is what `search` returns, and nothing else.
+Every other tool returns a JSON *dict* -- `local_search`, `grep`, `read_file`,
+`search_document`, `get_weather` -- and a dict fell through to the blind
+`text[:limit]` slice, which cut the JSON mid-string. Measured on the four
+shapes the model can actually receive:
+
+| tool             | payload  | what the model got        |
+|------------------|----------|---------------------------|
+| `local_search`   |  1718 ch | 1240 ch, invalid JSON     |
+| `read_file`      | 12094 ch | 1241 ch, invalid JSON     |
+| `grep`           |  3990 ch | 1240 ch, invalid JSON     |
+| `search_document`|  2828 ch | 1240 ch, invalid JSON     |
+
+Unparseable output is worth nothing, so a dict result over the cap was as
+useless as the empty `{"results": []}` this cap was written to remove. It went
+unnoticed because the event log holds only `search`, `get_weather` and `bash`
+calls: 35 of 36 searches exceeded the cap, but every `bash` result was 140-172
+chars, and the tools that break simply had not been used yet. A dict is now
+capped structurally too -- its biggest list field loses whole records from the
+tail, prose is clipped inside the rest, identity fields and the server's own
+totals stay intact, and a `note` says what was trimmed.
+
+The list path's own last resort had the same flaw in a narrower form: when one
+result's title or url alone exceeded the budget it answered
+`{"results": [], "showing": 0}`. Reachable only with a 1200+ char url, but it
+is the same empty answer, so it now clips the identity fields and keeps the
+result recognisable instead.
+
+**What the budget buys, measured** (so the number can be argued with):
+a 5-result web page (full page bodies, ~1400 chars each) keeps **2 of 5**
+sources at 1200 chars. A real 5-result *news* payload keeps **3 of 5** at 1200
+and fits **whole at 2400**. That is the trade the cap makes, and it is the
+number to change if the agent ever needs more sources than that.
+
+**Plain text still loses its tail.** `bash` output is head-sliced, so a verdict
+on the last line (a test summary, `git status`) is unreadable through the cap.
+Left alone because it does not bite this workload: every `bash` result in the
+62-call log was 140-172 chars. `_cap_head_slice` is the one function to change
+if a long command ever needs its tail.
+
 **News freshness** (`mcp_bridge._sort_news`, `_refresh_stale_news`). On 17 Nov
 2026 the agent answered "the latest news is November 12" for the Alaska Senate
 race while Google showed stories from that morning. Nothing was broken in the
