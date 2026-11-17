@@ -46,6 +46,41 @@ Fweddie extends its capabilities through a bridge to **OnIt's MCP servers**, all
 - **Jailroot:** File tools are restricted to a specific `MCP_DATA_PATH` (e.g., `/tmp/onit/data`).
 - **Human-in-the-Loop:** Critical commands trigger an approval request. The agent notifies the user it is "asking a person" and waits for a decision via the dashboard or API.
 
+### Tool secrets (API keys)
+
+The MCP servers are separate processes, so a key reaches them only through the
+environment the bridge hands to `stdio_client`. Each key resolves in this order,
+first hit wins:
+
+| # | Source | Notes |
+|---|---|---|
+| 1 | `secrets.yaml` in this repo | per-project override; git-ignored, template is `secrets.example.yaml` |
+| 2 | OS keychain, service `onit` | exactly what `onit setup` writes, so a provisioned machine needs no file |
+| 3 | unset | that one tool degrades; the agent still runs |
+
+Because the keychain is consulted second, **deleting `secrets.yaml` must change
+nothing** on a machine already set up — `test_tool_secrets.py` asserts this.
+
+```bash
+cp secrets.example.yaml secrets.yaml
+chmod 600 secrets.yaml
+$EDITOR secrets.yaml          # quote every value
+```
+
+| Key | Env var | Tool that needs it |
+|---|---|---|
+| `openweathermap_api_key` | `OPENWEATHERMAP_API_KEY` | `get_weather` |
+| `tavily_api_key` | `TAVILY_API_KEY` | `search` (first tier; else DuckDuckGo) |
+| `ollama_api_key` | `OLLAMA_API_KEY` | `search` (second tier), Ollama hosts |
+| `github_token` | `GITHUB_TOKEN` | `github_repo`, `git push` |
+| `huggingface_token` | `HF_TOKEN` | HuggingFace model downloads |
+
+Secrets are injected into the spawned subprocess only — never into Fweddie's
+own process, and an ambient `export` still wins over both sources. Startup
+logs one line per key with its source and length, never its value. Note that
+the `bash` tool runs as you, so it can read `secrets.yaml`; keep high-value
+tokens in the keychain.
+
 ## 📈 Evaluation & Benchmarking
 
 To ensure "full-duplex" performance, Fweddie is evaluated using the `fd-benchmark` suite.
@@ -116,6 +151,8 @@ Run the suite with the venv interpreter; every file is standalone (`python test_
 | `test_pipeline_asr.py` | long questions (3.5 s, 5.6 s) still close their turn |
 | `test_tool_result.py` | every tool handler settles its call via `result_callback`, including on error and timeout — the regression test for tools that run but are never spoken |
 | `test_tool_parity.py` | the bridge exposes OnIt's full toolset (14 tools), compared against a fixed list |
+| `test_tool_secrets.py` | tool-key resolution: file overrides keychain, deleting the file falls back to the keychain, blanks are omitted, YAML retyping is coerced (offline) |
+| `test_tool_secrets_live.py` | the key actually reaches the MCP subprocess — calls `get_weather` end to end (network) |
 | `test_bargein.py` / `test_guard.py` / `test_eventbus.py` | barge-in wiring, tool guardrails, dashboard events |
 
 ## 📚 References

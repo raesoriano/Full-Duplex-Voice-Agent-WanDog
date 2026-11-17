@@ -592,6 +592,10 @@ async def run() -> None:
                     len(bridge.tools), config.MCP_DATA_PATH)
         logger.info("  Guard: approval gate on (timeout {}s, fail-closed)",
                     config.MCP_APPROVAL_TIMEOUT)
+        # Which tool keys resolved, and from where. Names and sources only --
+        # never a value. A MISSING key is not fatal: that one tool degrades.
+        for line in config.describe_tool_secrets():
+            logger.info("    secret: {}", line)
     logger.info(
         "  Audio: in {} Hz, out {} Hz", config.INPUT_SAMPLE_RATE, config.OUTPUT_SAMPLE_RATE
     )

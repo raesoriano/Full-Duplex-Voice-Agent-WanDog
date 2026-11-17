@@ -382,3 +382,153 @@ def resolve_llm_api_key() -> str:
         "No LLM API key found. Run `onit setup` to store one, set "
         "ONIT_LLM_API_KEY, or set OPENAI_API_KEY."
     )
+
+
+# ---------------------------------------------------------------------------
+# Tool secrets
+# ---------------------------------------------------------------------------
+# The tool servers are separate processes, so a key reaches them only through
+# the environment we hand to `stdio_client`. They cannot consult the keychain
+# themselves -- `keyring` lives in this process, not in theirs.
+#
+# Resolution order for every tool key (first hit wins):
+#   1. repo-local secrets.yaml      -- per-project override, reviewed in a diff
+#   2. OS keychain, service "onit"  -- exactly what `onit setup` writes
+#   3. leave it unset               -- the tool degrades, the agent still runs
+#
+# OnIt's own order is env -> keychain -> file (setup.get_secret). We keep its
+# keyring names, so a machine already provisioned by `onit setup` needs no new
+# file at all: the file is an override on top, never a prerequisite. That is
+# deliberate -- a fresh clone with no secrets.yaml must still work.
+#
+# Passing these into the spawn environment is also what fixes the weather
+# tool: nothing used to forward them, so the server saw no
+# OPENWEATHERMAP_API_KEY even with the key sitting in the keychain, and
+# returned "OpenWeather API key not set".
+TOOL_SECRETS_PATH = Path(
+    os.environ.get(
+        "FWEDDIE_SECRETS_FILE",
+        str(Path(__file__).resolve().parent / "secrets.yaml"),
+    )
+)
+
+# keyring key -> env var the tool server actually reads. The left side is the
+# name OnIt stores under; the right side is what the server consults.
+TOOL_SECRETS: dict[str, str] = {
+    "openweathermap_api_key": "OPENWEATHERMAP_API_KEY",  # get_weather
+    "tavily_api_key": "TAVILY_API_KEY",                  # search, first tier
+    "ollama_api_key": "OLLAMA_API_KEY",                  # search, second tier
+    "github_token": "GITHUB_TOKEN",                      # github_repo, git push
+    "huggingface_token": "HF_TOKEN",                     # model downloads
+}
+
+_secrets_cache: dict | None = None
+_secrets_cache_mtime: float | None = None
+
+
+def _clean_secret(value) -> str | None:
+    """Coerce a YAML scalar to a usable string, or None.
+
+    Unquoted YAML turns `12345` into an int and `on`/`no` into a bool; str()
+    keeps the value intact instead of letting a `len()` or `.strip()` fail
+    later. Empty and whitespace-only values mean "not configured".
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _repo_secrets() -> dict:
+    """Read the repo-local secrets.yaml, re-reading only when it changes.
+
+    Cached on mtime so a long-running agent picks up an edit without a
+    restart, and the file is parsed once per change rather than once per
+    tool call. A missing or malformed file is not an error -- it just means
+    "no overrides", and resolution falls through to the keychain.
+    """
+    global _secrets_cache, _secrets_cache_mtime
+
+    path = TOOL_SECRETS_PATH
+    try:
+        stat = path.stat()
+    except OSError:
+        _secrets_cache, _secrets_cache_mtime = None, None
+        return {}
+
+    if _secrets_cache is not None and _secrets_cache_mtime == stat.st_mtime:
+        return _secrets_cache
+
+    # A world-readable secrets file is a mistake worth naming, but not worth
+    # refusing to start over.
+    if stat.st_mode & 0o077:
+        print(
+            f"[config] warning: {path} is readable by other users "
+            f"(mode {oct(stat.st_mode & 0o777)}); consider chmod 600",
+            file=sys.stderr,
+        )
+
+    try:
+        import yaml
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:  # malformed YAML, permissions, bad encoding
+        print(f"[config] ignoring unreadable {path}: {exc}", file=sys.stderr)
+        data = {}
+
+    if not isinstance(data, dict):
+        print(f"[config] {path} is not a mapping -- ignoring it", file=sys.stderr)
+        data = {}
+
+    _secrets_cache, _secrets_cache_mtime = data, stat.st_mtime
+    return data
+
+
+def _secret_source(name: str) -> tuple[str | None, str]:
+    """Resolve one secret and say where it came from.
+
+    Returns (value, source) where source is "file", "keychain" or "unset".
+    """
+    value = _clean_secret(_repo_secrets().get(name))
+    if value:
+        return value, "file"
+
+    _ensure_dbus_session()
+    value = _key_from_keyring(name)
+    if value:
+        return value, "keychain"
+
+    return None, "unset"
+
+
+def resolve_tool_secret(name: str) -> str | None:
+    """Return one tool secret by its OnIt keyring name, or None."""
+    return _secret_source(name)[0]
+
+
+def tool_secret_env() -> dict[str, str]:
+    """Every resolvable tool key as {env_var: value}.
+
+    Missing keys are omitted, never set to "". An empty env var reads as
+    present-but-blank to some HTTP clients, which produces a worse error than
+    an absent one (401 instead of "not configured").
+    """
+    resolved: dict[str, str] = {}
+    for name, env_var in TOOL_SECRETS.items():
+        value = resolve_tool_secret(name)
+        if value:
+            resolved[env_var] = value
+    return resolved
+
+
+def describe_tool_secrets() -> list[str]:
+    """One human-readable line per tool key, for the startup log.
+
+    Names and sources only -- never a value or a prefix of one.
+    """
+    lines = []
+    for name, env_var in TOOL_SECRETS.items():
+        value, source = _secret_source(name)
+        detail = f"len={len(value)}" if value else "MISSING"
+        lines.append(f"{name} -> {env_var} [{source}] {detail}")
+    return lines

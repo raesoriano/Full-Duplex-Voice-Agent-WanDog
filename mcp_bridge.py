@@ -89,6 +89,17 @@ class OnItMCPServer:
         spawn_env["ONIT_APPROVAL_CHANNEL"] = "1"
         spawn_env["ONIT_COMMAND_ALLOWLIST"] = "1"
 
+        # Tool secrets (OpenWeather, Tavily, GitHub, HuggingFace). The server
+        # is a separate process and cannot read the OS keychain, so the keys
+        # must travel in its environment. Resolved per server at spawn time --
+        # secrets.yaml first, then the keychain -- and scoped to this
+        # subprocess only: Fweddie's own process never gets them.
+        #
+        # An ambient env var still wins, because we only fill in keys that are
+        # not already present. That keeps an explicit `export` in control.
+        for var, value in config.tool_secret_env().items():
+            spawn_env.setdefault(var, value)
+
         return StdioServerParameters(
             command=config.ONIT_PYTHON,
             args=args,
