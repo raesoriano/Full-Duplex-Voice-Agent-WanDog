@@ -2,7 +2,10 @@
 
 > **Started:** 2026-11-07 · **Machine:** Raspberry Pi 5, 8 GB, aarch64, Debian 13, no GPU
 > **Repo:** `Fweddie-repo/` · **Venv:** `Fweddie-repo/.venv` (Python 3.12.16, torch-free)
-> **Status:** core voice loop built and import-verified; first live mic test pending
+> **Status:** **Working** (2026-11-17). The user confirmed on real hardware:
+> "this is working nicely." Streaming partials appear while speaking, the turn
+> closes ~0.9 s after speech end, and the answer is about the question just
+> asked. Pushed to GitHub at `f4836c85` and verified from a fresh clone.
 
 ---
 
@@ -375,10 +378,18 @@ barge-in even with the wiring. **Fix:** `VAD_MIN_VOLUME` is now a float, default
       section 8.
 - [x] **Silent agent / previous-question turns** — see section 12.
 - [x] **Mic gain reset** — the agent no longer forces 100%; it only reports.
-- [ ] **Live mic test on the Pi** — confirm capture card, speaker out, and
-      barge-in feel. (Can't be done in this sandbox — no real audio device.)
-      No `export` needed: the key is in the OS keychain, so just
-      `.venv/bin/python agent.py`.
+- [x] **Live mic test on the Pi** — **confirmed working** (2026-11-17). The
+      user reported: "this is working nicely." Words appear while speaking and
+      the agent answers the question just asked. No `export` needed: the key is
+      in the OS keychain, so just `.venv/bin/python agent.py`.
+- [ ] **Multi-turn from the mic** — one turn is confirmed; two in a row, checking
+      that the prompt carries `assistant` messages and ends on the new question,
+      has not been watched live.
+- [ ] `test_pipeline_asr.py` latency budget — measured 2.77 s against a 2.5 s
+      assertion (`TURN_SUBMIT_BUDGET`, line 65). Transcript and prompt were both
+      correct, so this is a threshold that got tighter than the Pi holds under
+      load. Decide whether 2.5 s or 3.0 s is the standard; do not tune it to
+      whatever the machine happens to do.
 - [ ] Numbers in the streaming partials (`"2 plus 2"` → `"TOO PLUS"`). The final
       transcript is correct because Whisper produces it, but the live draft can
       show the wrong digits mid-sentence.

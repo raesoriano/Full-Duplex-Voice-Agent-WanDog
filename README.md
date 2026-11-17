@@ -2,6 +2,10 @@
 
 Fweddie is a local, full-duplex voice command agent designed to run on resource-constrained hardware (e.g., Raspberry Pi 5). It provides a low-latency "listen-think-speak" loop with native support for barge-in (interruptions) and extensible tool use via MCP.
 
+> **Status (2026-11-17):** working on the Pi. Streaming partials appear while you
+> speak, the turn closes ~0.9 s after you stop, and the reply is about the
+> question just asked. Commit `f4836c85`, verified from a fresh clone.
+
 ## 🏗️ System Architecture
 
 Fweddie is built on the **Pipecat** framework, utilizing a linear pipeline that transforms raw audio into spoken responses.
