@@ -197,6 +197,55 @@ newest-result age 1.40 → 0.80 days, median 2 → 1 days, 5 rows fresher,
 went from 3/6 to 5/6 over 6 rounds, at a mean 0.8s → 2.2s, hidden behind the
 spoken announcement. `test_news_v2.py` covers all of it offline (11 groups).
 
+### 11b. The news backend, and the cancelled searches
+
+**News never used Tavily.** OnIt's `search(type="news")` branch calls ddgs and
+nothing else — it does not reach the Tavily tier its own *web* branch uses. ddgs'
+news engine is Bing-backed (`ddgs/engines/duckduckgo_news.py`, `provider =
+"bing"`). Same four queries, newest published date, 17 Nov 2026: ddgs returned
+15/17/14/15 Nov where Tavily's news topic returned 17 Nov on all four. So news
+now goes to Tavily first (`MCP_NEWS_BACKEND=tavily`, `topic=news`, `days=1`,
+`advanced`), falling back to OnIt's ddgs branch on failure or an empty page.
+`MCP_NEWS_BACKEND=onit` restores the old path. Both return the same payload
+shape, so the sort, the `age` labels and the cap are untouched.
+
+**Tavily's dates needed parsing.** Tavily stamps `"Tue, 17 Nov 2026 03:44:14
+GMT"`, which `_parse_news_date` did not know. Every Tavily row parsed as `None`,
+so the newest-first sort had nothing to sort on and the `age` labels came out
+empty — silently undoing all of the above. Measured before the fix: 10/10 rows
+unparseable. `test_news_tavily.py` (8 groups) now pins the date shapes, the sort,
+the cap, the backend switch and the echo guard.
+
+**Why searches were being cancelled.** 7 of 62 tool calls in
+`/tmp/fweddie_events.jsonl` were cancelled before returning, all 7 of them a
+`search`, 0.59–4.22s after starting. Five were triggered by the agent's *own*
+spoken announcement: `_ANNOUNCEMENTS["search"]` is `"Searching for that."`, sent
+as a `TTSSpeakFrame`; the mic heard it, the transcript read `"Searching for
+that."` or `"Searching."`, the VAD raised a turn start, and the resulting
+`InterruptionFrame` cancelled the in-flight call. The agent then told the user
+"it looks like that search was cancelled" (idx 2097, 2123).
+
+The pipeline has **no echo cancellation at all** — the v4 AEC (`aec.py`,
+`audio_io.py`, `ECHO_REF_DELAY_MS`, the mic duck) was left behind in the Pipecat
+rewrite, and the repo's history starts after it. The fix here is
+`FunctionCallUserMuteStrategy` as `user_mute_strategies` on
+`LLMUserAggregatorParams`: it suppresses user frames (VAD frames included) for
+exactly the window a function call is in progress, which is where the
+announcement lives, and lifts on `FunctionCallResultFrame` so barge-in on real
+answers is unchanged.
+
+Pipecat already settles a cancelled call itself — `_cancel_function_call_tasks`
+marks the runner `settled` *before* cancelling and the aggregator records
+`"CANCELLED"` — so a handler that reports its own result on the way out is
+rejected with "Ignoring result … already settled". The handler only logs.
+
+**Still open:** self-echo during ordinary answers. A `bot_started` followed by a
+`user_started` inside the bot's own utterance happened 26% of the time after real
+answers (vs 15% after announcements), so the echo is there too — it just costs a
+false barge-in rather than a cancelled tool. The v4 defence would need restoring
+as a mic duck while the bot speaks, or `pywebrtc_audio.EchoCanceller`, which is
+installed but unused.
+
 The two env vars `mcp_bridge` sets when spawning the servers are what make the
 safeguards actually fire (without them every ask collapses to a hard deny):
 

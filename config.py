@@ -317,6 +317,39 @@ MCP_NEWS_FRESH_DAYS = int(os.environ.get("FWEDDIE_MCP_NEWS_FRESH_DAYS", 0))
 # worst case without it: 10.6s to first speech.
 MCP_NEWS_REFRESH_BUDGET = float(os.environ.get("FWEDDIE_MCP_NEWS_REFRESH_BUDGET", 4.0))
 
+# Which backend serves a news search.
+#
+# OnIt's `search(type="news")` branch calls ddgs ONLY -- it never reaches the
+# Tavily tier that its own web branch uses (mcp_server.py: `if type == "news":
+# results = ddgs.news(...)`, no Tavily call at all). That is why news was
+# consistently older than a Google search of the same query.
+#
+# Measured 17 Nov 2026, newest published date per provider, same four queries:
+#
+#   query                                DDG news     Tavily (topic=news, days=1)
+#   Alaska US Senate election results    15 Nov       17 Nov
+#   Alaska Senate race Peltola Sullivan  17 Nov       17 Nov
+#   US Senate election results 2026      14 Nov       17 Nov
+#   latest news Jensen Huang Nvidia      15 Nov       17 Nov
+#
+# DDG was 0-3 days behind; Tavily was same-day on all four. Tavily's news topic
+# also carries a real `published_date` and honours a `days` window, which ddgs
+# does not. So when a key is configured, news goes to Tavily first and falls
+# back to OnIt's ddgs branch on failure or an empty page.
+#
+# "tavily" (default) = Tavily first, ddgs fallback. "onit" = always ddgs.
+# The key is read from the same secrets store as the other tool secrets; with
+# no key this setting is inert and news stays on ddgs.
+MCP_NEWS_BACKEND = os.environ.get("FWEDDIE_MCP_NEWS_BACKEND", "tavily").strip().lower()
+# Tavily's news recency window, in days. Tavily accepts 1-7 here. 1 = "today",
+# which is what "latest news" means; widen it if a query legitimately has no
+# same-day coverage (a race called three days ago).
+MCP_NEWS_TAVILY_DAYS = int(os.environ.get("FWEDDIE_MCP_NEWS_TAVILY_DAYS", 1))
+# Tavily "advanced" depth returns real published dates and better recall than
+# "basic" on news queries. Costs the same credits per call.
+MCP_NEWS_TAVILY_DEPTH = os.environ.get(
+    "FWEDDIE_MCP_NEWS_TAVILY_DEPTH", "advanced").strip().lower()
+
 # ---------------------------------------------------------------------------
 # Dashboard (Streamlit, reachable from other devices on the LAN)
 # ---------------------------------------------------------------------------

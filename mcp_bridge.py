@@ -357,6 +357,100 @@ def _shape_search_args(args: dict) -> dict:
     return shaped
 
 
+def _tavily_news_key() -> Optional[str]:
+    """The Tavily API key, read through config's secret store.
+
+    Returns None when unset, which makes the Tavily news tier inert rather
+    than fatal: news simply stays on OnIt's ddgs branch.
+    """
+    try:
+        secrets = config.tool_secret_env()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Could not read tool secrets for Tavily: {}", e)
+        return None
+    if not isinstance(secrets, dict):
+        return None
+    key = (secrets.get("TAVILY_API_KEY") or "").strip()
+    return key or None
+
+
+def _tavily_news(query: str, max_results: int) -> Optional[str]:
+    """Fetch news from Tavily's news topic, in OnIt's news payload shape.
+
+    Why this exists at all: OnIt's ``search(type="news")`` branch calls ddgs
+    only and never touches its own Tavily tier. Measured on 17 Nov 2026 the
+    newest story ddgs returned was 0-3 days old for the same queries where
+    Tavily returned a same-day one (see config.MCP_NEWS_BACKEND).
+
+    Returns the same ``[{title, snippet, date, source, url}]`` JSON string
+    OnIt returns, so everything downstream -- the date sort, the age labels,
+    the model cap -- works unchanged. Returns None on any failure, which is
+    the signal to fall back to ddgs.
+    """
+    key = _tavily_news_key()
+    if not key:
+        return None
+    try:
+        import requests
+    except Exception:  # noqa: BLE001
+        return None
+
+    body = {
+        "api_key": key,
+        "query": query,
+        "max_results": max(1, min(int(max_results), 20)),
+        "topic": "news",
+        "days": max(1, min(int(config.MCP_NEWS_TAVILY_DAYS), 7)),
+        "search_depth": config.MCP_NEWS_TAVILY_DEPTH,
+        "include_answer": False,
+    }
+    try:
+        resp = requests.post("https://api.tavily.com/search", json=body,
+                             timeout=config.MCP_TOOL_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Tavily news failed ({}); falling back to ddgs",
+                       str(e)[:120])
+        return None
+
+    rows = []
+    for r in data.get("results", []) or []:
+        # Tavily dates look like "Tue, 17 Nov 2026 03:44:14 GMT". Keep the
+        # raw string: _parse_news_date handles several shapes and the age
+        # labels are computed from it, so there is no need to normalise here.
+        rows.append({
+            "title": (r.get("title") or "").strip(),
+            "snippet": (r.get("content") or "").strip()[:300],
+            "date": (r.get("published_date") or "").strip(),
+            "source": (r.get("source") or _host_of(r.get("url") or "")).strip(),
+            "url": (r.get("url") or "").strip(),
+        })
+    if not rows:
+        logger.info("Tavily news returned nothing for {!r}; falling back to ddgs",
+                    query[:60])
+        return None
+    return json.dumps(rows, ensure_ascii=False)
+
+
+def _host_of(url: str) -> str:
+    """Bare hostname from a URL, for the `source` field Tavily may omit."""
+    try:
+        host = url.split("//", 1)[-1].split("/", 1)[0]
+        return host[4:] if host.startswith("www.") else host
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _news_count(text: str) -> int:
+    """How many rows are in a news payload, for logging. 0 if unparseable."""
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return 0
+    return len(data) if isinstance(data, list) else 0
+
+
 def _search_failed(text: str) -> bool:
     """Did a `search` call come back as an error object?"""
     if not isinstance(text, str):
@@ -374,10 +468,16 @@ def _search_failed(text: str) -> bool:
 def _parse_news_date(value: Any) -> Optional[datetime.datetime]:
     """Parse a news ``date`` into a datetime, or None.
 
-    OnIt formats news dates with ``strftime('%B %d, %Y')`` ("November 17,
-    2026") after parsing ddgs' ISO stamp, so both shapes reach us. Anything
-    unparseable returns None and sorts last but is never dropped -- a result
-    with an unreadable date is still a result.
+    Three shapes reach us:
+      * ddgs' raw ISO stamp ("2026-11-17T09:44:19+00:00");
+      * OnIt's reformatted "November 17, 2026" (it strftimes the ISO stamp);
+      * Tavily's RFC-2822-ish "Tue, 17 Nov 2026 03:44:14 GMT".
+    The Tavily shape is why this list exists: without it every Tavily row
+    parsed as None, so the date sort had nothing to sort on and the age labels
+    came out empty -- the two things the freshness work depends on. Measured
+    before the fix: 10/10 Tavily rows unparseable, newest=None.
+    Anything still unparseable returns None and sorts last but is never
+    dropped -- a result with an unreadable date is still a result.
     """
     if not isinstance(value, str) or not value.strip():
         return None
@@ -386,9 +486,23 @@ def _parse_news_date(value: Any) -> Optional[datetime.datetime]:
         return datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         pass
-    for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d", "%d %B %Y", "%d %b %Y"):
+    for fmt in (
+        "%B %d, %Y", "%b %d, %Y", "%Y-%m-%d", "%d %B %Y", "%d %b %Y",
+        # Tavily / RFC 2822: "Tue, 17 Nov 2026 03:44:14 GMT"
+        "%a, %d %b %Y %H:%M:%S %Z",
+        "%a, %d %b %Y %H:%M:%S %z",
+        "%a, %d %b %Y",
+    ):
         try:
             return datetime.datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    # Last resort: strip a leading weekday and try the common date-only forms,
+    # so an unexpected timezone suffix cannot hide the date entirely.
+    stripped = re.sub(r"^[A-Za-z]{3},\s*", "", text)
+    for fmt in ("%d %b %Y %H:%M:%S %Z", "%d %b %Y", "%d %B %Y"):
+        try:
+            return datetime.datetime.strptime(stripped, fmt)
         except ValueError:
             continue
     return None
@@ -1042,13 +1156,37 @@ class ToolBridgeProcessor(FrameProcessor):
                 # a voice turn for 3x MCP_TOOL_TIMEOUT, which is minutes of
                 # silence -- the very failure the spoken announcement exists to
                 # avoid.
-                text = await asyncio.wait_for(
-                    self._call_with_search_retry(name, call_args, server),
-                    timeout=config.MCP_TOOL_TIMEOUT,
-                )
+                # News goes to Tavily first when configured, because OnIt's
+                # news branch is ddgs-only and measurably older. A None here
+                # means "not applicable" and the normal path runs unchanged.
+                text = None
+                if name == "search" and call_args.get("type") == "news":
+                    text = await self._news_search(call_args, server)
+                if text is None:
+                    text = await asyncio.wait_for(
+                        self._call_with_search_retry(name, call_args, server),
+                        timeout=config.MCP_TOOL_TIMEOUT,
+                    )
             except asyncio.TimeoutError:
                 text = f"[tool timeout] {name} did not finish within " \
                        f"{config.MCP_TOOL_TIMEOUT:.0f}s."
+            except asyncio.CancelledError:
+                # The turn was interrupted (barge-in) while the tool was still
+                # running. Pipecat cancels this task and settles the call itself
+                # in _cancel_function_call_tasks -- it marks runner_item.settled
+                # BEFORE cancelling, then broadcasts FunctionCallCancelFrame,
+                # which the aggregator records as the tool result "CANCELLED".
+                # Reporting our own result here would be rejected ("Ignoring
+                # result for function call ... already settled"), so this only
+                # logs. The real fix is upstream: stop the barge-in happening.
+                # Measured in /tmp/fweddie_events.jsonl: 7 tool_calls were
+                # cancelled 0.6-4.2s after starting, all 7 of them a `search`,
+                # and 5 of the 7 were triggered by the agent's own "Searching
+                # for that." announcement being picked up by the mic.
+                logger.info("Tool {} cancelled after {:.1f}s (call settled as "
+                            "CANCELLED by Pipecat)", name,
+                            time.monotonic() - started)
+                raise
             except Exception as e:  # noqa: BLE001
                 logger.error("Tool {} failed: {}", name, e)
                 text = f"[tool error] {name}: {e}"
@@ -1144,6 +1282,40 @@ class ToolBridgeProcessor(FrameProcessor):
             logger.info("News refreshed: newest result now {} day(s) old",
                         best_age)
         return best
+
+    async def _news_search(self, call_args: dict, server) -> Optional[str]:
+        """Serve a news search from Tavily when configured, else from OnIt.
+
+        Returns the payload string, or None to mean "let the normal path run"
+        (Tavily disabled, no key, or Tavily came back empty/failed).
+
+        This sits ahead of ``server.call_tool`` rather than inside it because
+        OnIt's news branch is ddgs-only and we are not editing OnIt. Everything
+        after this point -- date sort, age labels, model cap -- is identical
+        whichever provider answered, because the payload shape is the same.
+        """
+        if config.MCP_NEWS_BACKEND != "tavily":
+            return None
+        query = (call_args.get("query") or "").strip()
+        if not query:
+            return None
+        wanted = call_args.get("_news_wanted") or call_args.get("max_results") or 5
+        try:
+            wanted = int(wanted)
+        except (TypeError, ValueError):
+            wanted = 5
+        # Run the blocking HTTP call off the event loop: this is a voice turn
+        # and a stalled loop would delay audio, not just the tool.
+        try:
+            payload = await asyncio.get_running_loop().run_in_executor(
+                None, _tavily_news, query, max(wanted, config.MCP_NEWS_OVERFETCH))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Tavily news path failed: {}", str(e)[:120])
+            return None
+        if payload is None:
+            return None
+        logger.info("News served by Tavily ({} result(s))", _news_count(payload))
+        return payload
 
     async def _call_with_search_retry(self, name: str, call_args: dict,
                                       server) -> str:
