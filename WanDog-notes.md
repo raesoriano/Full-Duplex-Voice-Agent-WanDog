@@ -1040,7 +1040,7 @@ tool need.
 
 `Fweddie` became `WanDog` everywhere: 26 tracked files, `FweddieLogger` ->
 `WanDogLogger`, `Fweddie-notes.md` -> `WanDog-notes.md`, and the configuration
-prefix `FWEDDIE_` -> `WANDOG_` across 98 variable names. The GitHub repo was
+prefix `FWEDDIE_` -> `WANDOG_` (53 distinct knobs, 99 occurrences). The GitHub repo was
 renamed `Full-Duplex-Voice-Agent-Fweddie` -> `Full-Duplex-Voice-Agent-WanDog`
 (GitHub redirects the old URL, so an existing clone still fetches), and the
 local checkout `Fweddie-repo/` -> `WanDog-repo/`.
