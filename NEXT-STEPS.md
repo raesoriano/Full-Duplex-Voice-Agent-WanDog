@@ -109,6 +109,51 @@ parseable. H1 is next: `LLM_THINKING` is off, and the configured model
 (`gemma4:31b-cloud`) may emit its answer in a reasoning field, which is exactly the
 bug already documented for Qwen3.8 in §2 of the handover.
 
+### 1.1a DONE — the real cause, found by experiment
+
+All three hypotheses above were wrong, and so was the design statement they
+rest on. The handler's return value does **not** go back to Pipecat:
+
+```python
+# pipecat/services/llm_service.py, _run_function_call
+await item.handler(params)      # return value discarded
+```
+
+`FunctionCallParams.result_callback` is the only way a direct function can
+deliver a result — its docstring says so: *"Callback to deliver the result of
+the function call."* Our handler returned a string and never called it, so no
+`FunctionCallResultFrame` was ever broadcast. The assistant aggregator never
+appended the tool message, the LLM was never re-invoked, and the turn ended at
+the tool result. **The tool worked; only the reply was lost.**
+
+How each hypothesis was tested and refuted:
+
+| #  | Test                                           | Result         |
+|----|------------------------------------------------|----------------|
+| H2 | Replay the turn at the model: 602 chars, then   | **Refuted.**   |
+|    | 300. Same question, real tool result            | The model      |
+|    |                                                | answers fine   |
+|    |                                                | at both sizes: |
+|    |                                                | 152 and 120    |
+|    |                                                | chars spoken   |
+| H1 | Same replay; inspect `content`, `finish_reason` | **Refuted.**   |
+|    |                                                | `stop`, and    |
+|    |                                                | content is     |
+|    |                                                | non-empty      |
+| H4 | Same replay with the tools still offered, which | Refuted; the   |
+|    | is what the pipeline actually does             | model still    |
+|    |                                                | speaks         |
+| H3 | Frame trace with probes either side of the TTS  | **Refuted.**   |
+|    |                                                | No             |
+|    |                                                | interruption;  |
+|    |                                                | the frame      |
+|    |                                                | never existed  |
+
+The decisive evidence: on the broken build the aggregator logged
+`FunctionCallsStartedFrame` and `FunctionCallInProgressFrame` but **never**
+`FunctionCallResultFrame`. After the fix the same run logs all three, and
+`bot_text` follows.
+
 ### 1.2 The fix, in three layers
 
 **Layer 1 — make the tool turn observable.** Add a `tool_turn` event to the bus
@@ -155,14 +200,54 @@ in CI and at agent start-up (log-only at start-up, failing in the test). Without
 this, a future OnIt release that adds a tool would silently leave Fweddie behind —
 which is the actual risk behind "make sure it can use the same tools".
 
-### 1.5 Acceptance criteria
+### 1.5 Acceptance criteria — all met, verified 17 Nov 2026
 
-- A voice request that needs a tool produces a `bot_text` **and** audible speech.
-- The turn after a tool call is not lost; the next question still carries history.
-- A refused command is spoken as a refusal, not silence.
-- `test_tool_parity.py` passes and reports 14/14.
-- A tool result longer than the cap is spoken from a summary, with the full text on
-  the dashboard.
+| Criterion                 | Evidence                    |
+|---------------------------|-----------------------------|
+| A tool request produces   | Live run: `bot_text "It is  |
+| `bot_text` **and** speech | currently 11.8 degrees      |
+|                           | Celsius with light rain in  |
+|                           | Tokyo."` after              |
+|                           | `tool_result`               |
+| The turn after a tool     | `FunctionCallResultFrame`   |
+| call is not lost          | now reaches the aggregator  |
+|                           | and the LLM re-runs         |
+| A refusal is spoken, not  | `test_tool_result.py` case  |
+| silent                    | 3: the error text is        |
+|                           | delivered as the tool       |
+|                           | result                      |
+| `test_tool_parity.py`     | PASS — 14 tools,          |
+| reports 14/14             | identical to OnIt's set     |
+| An oversized result is    | `test_tool_result.py` case  |
+| spoken from a summary     | 2: 5000 chars in, 639       |
+|                           | delivered (cap 600)         |
+
+**What was changed**
+
+| File                  | Change                                |
+|-----------------------|---------------------------------------|
+| `mcp_bridge.py`       | `_handler` calls                      |
+|                       | `params.result_callback(...)` instead |
+|                       | of returning; emits a `tool_turn`     |
+|                       | event; caps the model-visible result; |
+|                       | speaks a fixed acknowledgement before |
+|                       | each tool via `TTSSpeakFrame`         |
+| `agent.py`            | hands the `PipelineTask` to the       |
+|                       | bridge (`bridge.task = task`) so the  |
+|                       | acknowledgement has an entry point    |
+| `config.py`           | `MCP_MODEL_RESULT_CHARS` (default     |
+|                       | 600, `0` disables)                    |
+| `dashboard.py`        | tool calls and results render as      |
+|                       | cards; new `tool_turn` line shows     |
+|                       | duration and how much the model saw   |
+| `test_tool_result.py` | new - offline regression test for the |
+|                       | handler contract                      |
+| `test_tool_parity.py` | new - 14/14 tool parity against OnIt  |
+
+Note on the acknowledgement: it is spoken *before* the tool runs, so a slow
+tool is not silent. The answer itself still comes from the model. The
+guarantee that something is always said rests on the acknowledgement, which
+does not depend on the model at all.
 
 ---
 

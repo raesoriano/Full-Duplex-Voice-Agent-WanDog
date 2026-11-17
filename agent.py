@@ -537,6 +537,13 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     pipeline = Pipeline(stages)
     task = PipelineTask(pipeline)
 
+    # The tool bridge speaks its acknowledgements by queuing a TTSSpeakFrame,
+    # and a frame enters the pipeline through the task. The bridge is not a
+    # stage in the list above (the tools live on the LLM context, not in the
+    # chain), so hand it the task explicitly.
+    if bridge is not None:
+        bridge.task = task
+
     return pipeline, task, input_transport, output_transport
 
 

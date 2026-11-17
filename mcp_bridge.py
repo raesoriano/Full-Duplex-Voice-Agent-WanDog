@@ -24,6 +24,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from typing import Any, Callable, Optional
 
 from loguru import logger
@@ -244,6 +245,49 @@ def _short(value: Any, limit: int = 600) -> str:
     return text if len(text) <= limit else text[:limit] + " …"
 
 
+# What the agent says before a tool runs. Keyed by tool name so the phrase
+# matches the act; anything unlisted gets a neutral line. These are spoken
+# verbatim, so they are short, lowercase-friendly, and free of punctuation the
+# TTS would read out.
+_ANNOUNCEMENTS = {
+    "search": "Searching for that.",
+    "local_search": "Checking my notes.",
+    "search_document": "Looking through the documents.",
+    "index_documents": "Indexing the documents.",
+    "fetch_content": "Fetching that page.",
+    "get_weather": "Checking the weather.",
+    "bash": "Running that command.",
+    "serve": "Starting that process.",
+    "read_file": "Reading the file.",
+    "write_file": "Writing the file.",
+    "edit_file": "Editing the file.",
+    "grep": "Searching the files.",
+    "github_repo": "Checking the repository.",
+    "send_file": "Sending the file.",
+}
+
+
+def _announcement(tool_name: str) -> str:
+    """A short spoken line to say before ``tool_name`` runs."""
+    return _ANNOUNCEMENTS.get(tool_name, "One moment.")
+
+
+def _cap_for_model(text: str, limit: int) -> str:
+    """Return the part of a tool result the LLM is allowed to see.
+
+    The voice reply is one or two sentences, so the model needs the head of the
+    result, not all of it. Keeping the head and naming the remainder tells the
+    model what it is missing without asking it to digest a wall of JSON. The
+    full text is untouched: it goes to the dashboard and the session folder.
+
+    ``limit <= 0`` disables the cap.
+    """
+    if limit <= 0 or len(text) <= limit:
+        return text
+    return (text[:limit].rstrip()
+            + f"\n[truncated: showing {limit} of {len(text)} chars]")
+
+
 # ---------------------------------------------------------------------------
 # The approval guard: human-in-the-loop for commands OnIt's policy will not
 # decide alone
@@ -450,6 +494,28 @@ class ToolBridgeProcessor(FrameProcessor):
         # it so OnIt's ``needs_approval`` payloads reach a person.
         self.guard = guard or Guard()
 
+        # Set by agent.build_pipeline once the PipelineTask exists. A spoken
+        # acknowledgement has to be queued through the task (the pipeline's own
+        # entry point), because this processor is not itself in the stage list.
+        self.task = None
+        # Layer 2 switch: say a short line before a tool runs, so the user hears
+        # something even while a slow tool is still working.
+        self.announce = True
+
+    async def _say(self, text: str) -> None:
+        """Queue a fixed utterance to be spoken, without going through the LLM.
+
+        ``TTSSpeakFrame`` is Pipecat's supported way to speak a literal string.
+        Failing to speak must never break the tool call, so this is best-effort.
+        """
+        if not self.announce or self.task is None or not text:
+            return
+        from pipecat.frames.frames import TTSSpeakFrame
+        try:
+            await self.task.queue_frame(TTSSpeakFrame(text=text))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not queue spoken acknowledgement: {}", e)
+
     async def discover(self) -> list[Callable]:
         """Connect to every server, build a callable per tool, and return the
         list to hand to LLMContext(tools=[...])."""
@@ -500,18 +566,54 @@ class ToolBridgeProcessor(FrameProcessor):
             doc_lines.append(f"    {pname}: {pdesc or pname}.")
         docstring = "\n".join(doc_lines)
 
-        async def _handler(params: FunctionCallParams, **kwargs: Any) -> str:
+        # Pipecat 1.15 contract: a direct function MUST deliver its result by
+        # calling ``params.result_callback``. ``_run_function_call`` does
+        # ``await item.handler(params)`` and DISCARDS the return value, so a
+        # handler that merely ``return``s a string broadcasts no
+        # FunctionCallResultFrame at all. Without that frame the assistant
+        # aggregator never appends the tool message to the context, the LLM is
+        # never re-invoked, and the turn dies silently at the tool result --
+        # which is exactly the "tool use is not spoken" bug. The return value
+        # is therefore irrelevant; the callback is the whole contract.
+        async def _handler(params: FunctionCallParams, **kwargs: Any) -> None:
+            started = time.monotonic()
+            # Layer 2: say what is happening before the tool runs. A tool can
+            # take seconds (a web search) or wait on a person (an approval), and
+            # silence during that time reads as "it stopped working". This is a
+            # fixed phrase on purpose: it must not depend on the model.
+            await self._say(_announcement(name))
             try:
-                return await asyncio.wait_for(
+                text = await asyncio.wait_for(
                     self.guard.handle(name, kwargs, server, server.call_tool),
                     timeout=config.MCP_TOOL_TIMEOUT,
                 )
             except asyncio.TimeoutError:
-                return f"[tool timeout] {name} did not finish within " \
+                text = f"[tool timeout] {name} did not finish within " \
                        f"{config.MCP_TOOL_TIMEOUT:.0f}s."
             except Exception as e:  # noqa: BLE001
                 logger.error("Tool {} failed: {}", name, e)
-                return f"[tool error] {name}: {e}"
+                text = f"[tool error] {name}: {e}"
+
+            full = text if isinstance(text, str) else str(text)
+            # Layer 3: the model sees a bounded head of the result; the full
+            # text stays in the session folder and on the dashboard. This is
+            # what keeps a huge MCP payload from being the thing that decides
+            # whether the agent speaks.
+            model_text = _cap_for_model(full, config.MCP_MODEL_RESULT_CHARS)
+
+            # Layer 1: make the tool turn observable. The event log used to
+            # record the result but not what happened next, which is why the
+            # silent-turn bug could not be diagnosed from it.
+            if self.guard.bus is not None:
+                await self.guard.bus.emit(
+                    "tool_turn", tool=name, ms=int((time.monotonic() - started) * 1000),
+                    result_chars=len(full), model_chars=len(model_text),
+                    truncated=model_text != full,
+                )
+
+            # Always settle the call, even on failure: a handler that raises
+            # out of here would leave the call unsettled until its timeout.
+            await params.result_callback(model_text)
 
         _handler.__name__ = name
         _handler.__doc__ = docstring

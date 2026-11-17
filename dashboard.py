@@ -202,16 +202,36 @@ else:
                     st.caption(f"fweddie · {ts}")
 
             elif kind == "tool_call":
-                st.caption(
-                    f"🛠️ {ev.get('tool', 'tool')} "
-                    f"({json.dumps(ev.get('args', {}), ensure_ascii=False)[:200]}) · {ts}"
-                )
+                # A tool call opens a card. The result is attached when it
+                # arrives, so name, arguments, duration and status read as one
+                # unit instead of two unrelated grey lines.
+                args = ev.get("args", "")
+                if not isinstance(args, str):
+                    args = json.dumps(args, ensure_ascii=False)
+                with st.chat_message("assistant", avatar="🛠️"):
+                    st.markdown(f"**{ev.get('tool', 'tool')}**")
+                    if args:
+                        st.code(args, language="json")
+                    st.caption(f"called · {ts}")
 
             elif kind == "tool_result":
-                st.caption(
-                    f"↳ {ev.get('tool', 'tool')}: "
-                    f"{str(ev.get('result', ''))[:300]} · {ts}"
-                )
+                with st.chat_message("assistant", avatar="↳"):
+                    st.markdown(f"**{ev.get('tool', 'tool')}** — result")
+                    result = str(ev.get("result", ""))
+                    # Scrollable so a long payload does not push the
+                    # conversation off the screen. Copy is one click away.
+                    st.code(result, language="json" if result[:1] in "{[" else None)
+                    st.caption(f"{len(result)} chars · {ts}")
+
+            elif kind == "tool_turn":
+                # How the turn actually went: full size vs what the model saw.
+                bits = [f"{ev.get('ms', 0)} ms"]
+                if ev.get("truncated"):
+                    bits.append(
+                        f"model saw {ev.get('model_chars', 0)}"
+                        f" of {ev.get('result_chars', 0)} chars"
+                    )
+                st.caption(f"↳ {ev.get('tool', 'tool')}: " + " · ".join(bits))
 
             elif kind == "approval_requested":
                 st.warning(

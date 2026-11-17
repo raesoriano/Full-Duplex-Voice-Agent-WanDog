@@ -252,6 +252,13 @@ MCP_TOOL_TIMEOUT = float(os.environ.get("FWEDDIE_MCP_TOOL_TIMEOUT", 320))
 # it as a refusal (fail-closed). OnIt's own tickets expire after 900s; we are
 # tighter because a voice agent should not hang mid-conversation.
 MCP_APPROVAL_TIMEOUT = float(os.environ.get("FWEDDIE_MCP_APPROVAL_TIMEOUT", 120))
+# How much of a tool result the MODEL is allowed to see, in characters.
+# The full result is kept for the dashboard and the session folder; only this
+# much is handed back to the LLM. A 600-char JSON blob of URLs and article text
+# is a poor thing to ask a speech-first model to summarise, and the voice reply
+# is one or two sentences, so the head of the result is enough to speak from.
+# 0 disables the cap (the old behaviour).
+MCP_MODEL_RESULT_CHARS = int(os.environ.get("FWEDDIE_MCP_MODEL_RESULT_CHARS", 600))
 
 # ---------------------------------------------------------------------------
 # Dashboard (Streamlit, reachable from other devices on the LAN)

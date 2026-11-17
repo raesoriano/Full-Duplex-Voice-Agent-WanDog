@@ -114,6 +114,8 @@ Run the suite with the venv interpreter; every file is standalone (`python test_
 | `test_turn_context.py` | both aggregators share one `LLMContext`, so answers reach history |
 | `test_stream_asr.py` | streaming partials arrive before speech ends |
 | `test_pipeline_asr.py` | long questions (3.5 s, 5.6 s) still close their turn |
+| `test_tool_result.py` | every tool handler settles its call via `result_callback`, including on error and timeout — the regression test for tools that run but are never spoken |
+| `test_tool_parity.py` | the bridge exposes OnIt's full toolset (14 tools), compared against a fixed list |
 | `test_bargein.py` / `test_guard.py` / `test_eventbus.py` | barge-in wiring, tool guardrails, dashboard events |
 
 ## 📚 References
