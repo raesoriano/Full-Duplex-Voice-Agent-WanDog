@@ -74,12 +74,12 @@ STOP_FILE = Path(config.DASHBOARD_STOP_FILE)
 CLEAR_FILE = Path(config.DASHBOARD_CLEAR_FILE)
 
 ASSETS = Path(__file__).parent / "assets"
-# Two faces, cut from one reference sheet by tools/make_husky.py:
+# Two faces, both scaled from the ASCII art in assets/ by tools/make_husky.py:
 #   husky-idle  -- mouth open, tongue out. The bar's resting state, and the
 #                  avatar beside every reply.
 #   husky-think -- muzzle up. The bar's face while a turn is in flight.
-# Rasters, not SVG: the drawings are 112-125 px of a photograph of a drawing,
-# and contour tracing them produced blobs (see tools/make_husky.py).
+# Rasters, not SVG: the source is a raster, and contour tracing it produced blobs
+# (see tools/make_husky.py).
 HUSKY_IDLE_PNG = ASSETS / "husky-idle.png"
 HUSKY_THINK_PNG = ASSETS / "husky-think.png"
 

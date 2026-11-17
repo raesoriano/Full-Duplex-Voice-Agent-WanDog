@@ -141,13 +141,22 @@ def test_avatar_is_the_idle_face() -> None:
 def test_icons_are_raster_and_two_tone() -> None:
     """Both faces must exist, differ, and carry a white face under dark ink.
 
-    A raster is the point: the drawings are 112-125 px crops of a photograph of a
-    drawing, and contour-tracing them produced blobs (the eyes fused with the
-    muzzle). The two-tone requirement is the one that is easy to lose silently --
-    dark ink alone is invisible on the dark theme, and a white face alone is
-    invisible on the light one, so both must be in the same file.
+    A raster is the point: the source is a raster, and contour-tracing it produced
+    blobs (the eyes fused with the muzzle). The two-tone requirement is the one
+    that is easy to lose silently -- dark ink alone is invisible on the dark
+    theme, and a white face alone is invisible on the light one, so both must be
+    in the same file.
+
+    The aspect check is what the ASCII sources bring with them. A character cell
+    is taller than it is wide, so the source renders are already stretched; a
+    rebuild that re-renders at square cells comes out 1.82x too wide, which is a
+    squashed husky and easy to ship without noticing. The expected aspect is read
+    from the source art, not hardcoded, so re-exporting the art re-baselines it.
     """
     from PIL import Image
+
+    sys.path.insert(0, str(Path(__file__).parent / "tools"))
+    import make_husky
 
     idle_path = ASSETS / "husky-idle.png"
     think_path = ASSETS / "husky-think.png"
@@ -176,7 +185,21 @@ def test_icons_are_raster_and_two_tone() -> None:
         # Transparent margin on all four sides, or the icon is a crop that will
         # read as off-centre in a circle.
         assert not opaque[0].any() and not opaque[-1].any(), f"{name}: no top/bottom margin"
+
+        # Aspect: the drawn head must have the shape the ASCII art has, not the
+        # shape a square cell would give it.
+        drawn = opaque & (lum < 128)
+        ys, xs = np.nonzero(drawn)
+        got = (xs.max() - xs.min() + 1) / (ys.max() - ys.min() + 1)
+        src = make_husky.load_ink(f"ascii-{name}")
+        ys2, xs2 = np.nonzero(src > 0.30)
+        want = (xs2.max() - xs2.min() + 1) / (ys2.max() - ys2.min() + 1)
+        assert abs(got - want) / want < 0.05, (
+            f"{name}: drawn aspect {got:.3f} but the ASCII art is {want:.3f} "
+            f"-- the cell aspect was not applied (square cells squash the head)"
+        )
     print("4. both faces are raster, differ, white under ink    OK")
+    print("   ...and keep the ASCII art's aspect, not a square-cell one  OK")
 
 
 # ---------------------------------------------------------------------------

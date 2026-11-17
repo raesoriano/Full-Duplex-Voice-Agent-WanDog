@@ -858,32 +858,57 @@ unconditional `follow()` never runs. The check that guards this therefore append
 a turn from inside the browser session. The first version of that check appended
 before the browser started and passed against a deliberately broken script.
 
-## The husky icons are cut from a reference sheet
+## The husky icons are scaled from the ASCII art
 
-Two faces, both cropped from one hand-drawn sheet
-(`assets/reference/husky-sheet.jpg`, kept so the icons can be re-cut):
+Two faces, both scaled from the ASCII art in `assets/` (`ascii-idle.png` and
+`ascii-think.png`, kept so the icons can be rebuilt):
 
-* row 2, column 1 -- mouth open, tongue out. The bar at rest, and the avatar
+* `ascii-idle.png` -- mouth open, tongue out. The bar at rest, and the avatar
   beside every reply.
-* row 3, column 4 -- muzzle up. The bar while a turn is in flight.
+* `ascii-think.png` -- muzzle up. The bar while a turn is in flight.
 
-`tools/make_husky.py` regenerates them.
+`tools/make_husky.py` regenerates `husky-idle.png`, `husky-think.png` and the
+`husky-32.png` favicon from them.
 
-### Why rasters, and not the traced SVG that was here before
+### The source is a halftone, so it is decoded before it is scaled
 
-The previous icon was an SVG I drew by hand, and tracing it was fine because the
-shapes were mine. These are 112-125 px crops of a *photograph* of a drawing, and
-tracing them at that resolution produced blobs: the outline broke into fragments,
-the eyes fused with the muzzle, and the result read as a smudge. So the icons are
-PNGs at 4-6x the size they are drawn at, cut with an alpha matte rather than a
-contour:
+The two source files are renders of the ASCII art: one text glyph per cell, 100
+columns by 55 rows on a 6.59 x 12.00 px cell. That is a halftone -- the tone is
+carried by WHICH character sits in a cell, so the ink in a cell is a few thin
+strokes rather than a flat patch.
 
-* ink alpha is a linear ramp of the inverse grey level,
-  `(232 - v) / (232 - 70)`, gamma 0.85 to keep thin lines from greying out at
-  30 px;
-* the same matte, thresholded at 0.42, is flood-filled from the border to find the
-  SILHOUETTE, which is painted white underneath. Without it the icon is dark ink
-  on a dark page (invisible) or a bare outline on a light one;
+Downscaling such a render directly keeps the halftone. At 192 px the character
+texture is still visible; by 30 px it has aliased into flecks that read as dirt
+on the face. Measured on the idle head, a direct downscale leaves ink in 0.078 of
+the face at 192 px, against 0.167 of solid ink in the source.
+
+So the builder averages each cell to one density value first -- throwing the
+glyph shapes away and keeping the tone the artist drew -- then re-renders that
+100x55 grid as a continuous image. The tone window is calibrated so ink coverage
+stays flat as the size drops (0.256 of the face at 192 px, 0.268 at 30 px),
+which is what keeps the strokes from greying out at icon size.
+
+### The cell aspect is measured, not assumed
+
+A character cell is taller than it is wide, so the source renders are already
+stretched: 12.00/6.59 = 1.82, which is the 1.84 the ASCII art itself implies.
+Re-rendering the decoded grid at square cells would undo that and give a husky
+1.82x too wide. The builder therefore reads the cell aspect off the source image
+and re-renders at that value, and both the builder and a test refuse to accept an
+icon whose drawn aspect has drifted from the source art's by more than 3%.
+
+### Why rasters, and not a traced SVG
+
+Tracing a raster this small to SVG produced blobs: the outline broke into
+fragments, the eyes fused with the muzzle, and the result read as a smudge. So
+the icons are PNGs at 6-7x the size they are drawn at, built with an alpha matte
+rather than a contour:
+
+* ink alpha is the inverse grey level, normalised to the art's own 99.5th
+  percentile so the tone window means the same thing for both heads;
+* the same matte, thresholded at 0.30, is flood-filled from the border to find
+  the SILHOUETTE, which is painted white underneath. Without it the icon is dark
+  ink on a dark page (invisible) or a bare outline on a light one;
 * the result is trimmed to the drawing and padded back to a square, so both faces
   are the same size in the bar and neither has a cropped chin.
 
@@ -891,23 +916,22 @@ contour:
 
 1. **The closing kernel sealed the background.** The silhouette needs a
    morphological close, because both outlines have pinholes and the fill leaks
-   through them. But closing also grows the ink, and on a crop with only 3 px of
-   air the grown outline reached the border and trapped the surrounding
-   background in pockets the corner fill could never enter. Only 1070 of ~8000
-   background pixels were reached; the rest were counted as "inside", so the white
-   face covered the whole rectangle and the icon was a white square. Fix: pad by
-   the kernel width BEFORE closing.
-2. **The kernels differ per icon.** The idle head's outline closes at 9 px; the
-   thinking head's jaw leaves a gap at the throat that needs 13. Below those
-   values the fill escapes and the face never appears -- measured as the point
-   where the filled fraction stops growing (idle 0.858 -> 0.923 at k=9, flat
-   after; think 0.651 -> 0.767 -> 0.853 at k=9 and k=11, flat after 13).
+   through them. But closing also grows the ink, and on a crop with little air the
+   grown outline reaches the border and traps the surrounding background in
+   pockets the corner fill can never enter -- the white face then covers the whole
+   rectangle and the icon is a white square. Fix: pad by the kernel width BEFORE
+   closing.
+2. **The kernels differ per icon.** Measured as the point where the filled
+   fraction stops growing: the idle head closes by k=9 (0.496 -> 0.508, flat
+   after), the thinking head's jaw leaves a gap at the throat that needs the full
+   9 (0.322 -> 0.553 by k=9). Below that the fill escapes and the face never
+   appears.
 3. **The two faces came out byte-identical.** The PNG renderer screenshotted one
    page holding both icons at the window size of the FIRST one. Caught by
    comparing the two files.
 
 The PNGs are inlined as data URIs: there is no static route to `assets/`, and a
-data URI cannot 404 or go stale while an icon is being re-cut. `assets/husky-32.png`
+data URI cannot 404 or go stale while an icon is being rebuilt. `assets/husky-32.png`
 remains the favicon, which Streamlit requires to be raster.
 
 ## The bar's face follows the turn
