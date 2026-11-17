@@ -179,7 +179,12 @@ def _var_block(palette: dict) -> str:
 # emits, which is also how the OnIt UI does it.
 
 VALID_THEMES = ("light", "dark")
-DEFAULT_THEME = "dark"
+# Light is the default: a first-time reader gets the paper-white page, and the
+# switch is there for whoever wants the dark one. It has to agree with
+# .streamlit/config.toml (base = "light", same palette), which paints the frame
+# before this stylesheet exists -- if the two disagreed, the page would flash the
+# other theme on every load.
+DEFAULT_THEME = "light"
 
 ss = st.session_state
 if "theme" not in ss:
@@ -1172,7 +1177,12 @@ if ss.pop("clear_box", False):
 if "mic_on" not in ss:
     ss["mic_on"] = mic_state()
 
-busy = turn_in_flight(read_events())
+# NOTE: there is deliberately no module-level `busy` here. The Send/Stop swap
+# lives in its own timed fragment below, because a value read once in the main
+# script cannot notice the agent finishing: the main script only re-runs when a
+# widget is touched. That is exactly the "stuck on Stop" bug -- measured with the
+# turn ending in the log and data-busy already 0 in the bar, while the composer
+# still showed Stop for 16 s and only reverted on the next click.
 
 
 def mic_button() -> None:
@@ -1201,6 +1211,64 @@ def mic_button() -> None:
         ss["mic_on"] = not live
         set_mic_state(ss["mic_on"])
 
+
+# The Send/Stop swap, in a fragment that re-runs on a timer.
+#
+# Why a fragment and not an `if busy:` in the main script: the main script only
+# re-runs when a widget is touched, so a value read there is frozen at the moment
+# of the last click. The turn ends in the LOG, not in the page, so nothing told
+# the composer to swap back and the button sat on Stop until the next click.
+# Measured before this fix: with bot_stopped appended to the log, the bar's
+# data-busy was already "0" one second later while .st-key-stopbtn was still the
+# only control present -- 16 s, unchanged, until the probe clicked something.
+#
+# The bar's face already worked this way (its own run_every=1.0 fragment); this
+# is the same pattern applied to the control that has to agree with it. The
+# transcript and the face run at 1.0 s too, so the three cannot disagree by more
+# than one tick.
+#
+# Nothing else moved into the fragment. The text box stays in the main script on
+# purpose: a fragment that re-runs every second around a widget the person is
+# typing into is how you lose half-typed text.
+@st.fragment(run_every=1.0)
+def send_control() -> None:
+    """Render Stop while a turn is in flight, Send otherwise."""
+    busy = turn_in_flight(read_events())
+
+    if busy:
+        # Wrapped in a keyed container so the CSS can reach it: a container
+        # keyed "stopbtn" becomes .st-key-stopbtn, which is how the red
+        # styling is applied without depending on widget order.
+        with st.container(key="stopbtn"):
+            stop_clicked = st.button(
+                "", key="stopbtn_btn", icon=":material/stop:",
+                help="Stop this turn (like barge-in)",
+            )
+        if stop_clicked:
+            request_stop()
+            # Reflect the intent immediately: waiting for the agent's
+            # interrupted event would leave the button looking unresponsive
+            # for up to one poll interval.
+            st.rerun()
+        return
+
+    with st.container(key="sendbtn"):
+        send_clicked = st.button(
+            "", key="sendbtn_btn", icon=":material/arrow_upward:",
+            help="Send (or press Ctrl+Enter)",
+        )
+    if send_clicked:
+        # Read from session_state, not from the `typed` local: a fragment
+        # re-executes on its own, so a name bound in the main script's scope is
+        # not part of its context. The keyed text box keeps its value here.
+        text = (ss.get("txt") or "").strip()
+        if text:
+            send_typed(text)
+            ss["clear_box"] = True
+            # Full-app rerun (the default scope), so the box actually clears:
+            # that happens at the top of the main script, which a
+            # fragment-scoped rerun would not reach.
+            st.rerun()
 
 with st.container(key="composer"):
     c_attach, c_mic, c_text, c_send, c_model = st.columns(
@@ -1238,7 +1306,10 @@ with st.container(key="composer"):
         #
         # `enter_to_submit` does not exist on this widget, and `height` keeps the
         # pill one line tall until the text wraps.
-        typed = st.text_area(
+        #
+        # The return value is not used: the Send handler reads ss["txt"] instead,
+        # because it lives in a fragment and so cannot see a name bound here.
+        st.text_area(
             "Message",
             key="txt",
             height=44,
@@ -1247,33 +1318,8 @@ with st.container(key="composer"):
         )
 
     with c_send:
-        if busy:
-            # Wrapped in a keyed container so the CSS can reach it: a container
-            # keyed "stopbtn" becomes .st-key-stopbtn, which is how the red
-            # styling is applied without depending on widget order.
-            with st.container(key="stopbtn"):
-                stop_clicked = st.button(
-                    "", key="stopbtn_btn", icon=":material/stop:",
-                    help="Stop this turn (like barge-in)",
-                )
-            if stop_clicked:
-                request_stop()
-                # Reflect the intent immediately: waiting for the agent's
-                # interrupted event would leave the button looking unresponsive
-                # for up to one poll interval.
-                st.rerun()
-        else:
-            with st.container(key="sendbtn"):
-                send_clicked = st.button(
-                    "", key="sendbtn_btn", icon=":material/arrow_upward:",
-                    help="Send (or press Ctrl+Enter)",
-                )
-            if send_clicked:
-                text = (typed or "").strip()
-                if text:
-                    send_typed(text)
-                    ss["clear_box"] = True
-                    st.rerun()
+        send_control()
+
 
     with c_model:
         # Placeholder: model selection comes later.

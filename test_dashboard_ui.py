@@ -241,27 +241,31 @@ def test_theme_toggle_switches_and_persists() -> None:
     both a click and a reload), so the dashboard emits its palette as CSS
     variables and carries the choice in the URL. This pins both halves: the
     palette really changes, and the choice is readable on the next run.
+
+    Light is the default, so this also pins the direction of the first render:
+    a fresh session must land on the light palette with the dark-mode glyph
+    showing, which is the one that says "switch to dark".
     """
     _seed({"kind": "session_start", "ts": time.time()})
     at = AppTest.from_file(DASHBOARD, default_timeout=60).run()
     assert not list(at.exception), list(at.exception)
-    assert at.session_state["theme"] == "dark", at.session_state["theme"]
+    assert at.session_state["theme"] == "light", at.session_state["theme"]
 
-    # The dark palette is the one on :root; the light one is not.
+    # The light palette is the one on :root; the dark one is not.
     blob = "\n".join(m.value for m in at.markdown)
-    assert "--fw-bg: #262624" in blob, "the dark palette was not emitted"
-    assert at.button(key="themebtn_btn").icon == ":material/light_mode:", (
+    assert "--fw-bg: #faf9f5" in blob, "the light palette was not emitted"
+    assert at.button(key="themebtn_btn").icon == ":material/dark_mode:", (
         at.button(key="themebtn_btn").icon
     )
 
     at.button(key="themebtn_btn").click().run()
     assert not list(at.exception), list(at.exception)
-    assert at.session_state["theme"] == "light", at.session_state["theme"]
-    assert at.query_params.get("theme") == "light", dict(at.query_params)
+    assert at.session_state["theme"] == "dark", at.session_state["theme"]
+    assert at.query_params.get("theme") == "dark", dict(at.query_params)
 
     blob = "\n".join(m.value for m in at.markdown)
-    assert "--fw-bg: #faf9f5" in blob, "the light palette was not emitted"
-    assert at.button(key="themebtn_btn").icon == ":material/dark_mode:", (
+    assert "--fw-bg: #262624" in blob, "the dark palette was not emitted"
+    assert at.button(key="themebtn_btn").icon == ":material/light_mode:", (
         at.button(key="themebtn_btn").icon
     )
     print("11. theme toggles both palettes and the glyph    OK")

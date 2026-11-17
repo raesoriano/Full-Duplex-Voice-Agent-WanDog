@@ -12,19 +12,24 @@
 # widget defaults Streamlit computes before any of our CSS runs -- the text field,
 # the code blocks a tool result renders into, the spinner.
 
+
 [theme]
-# "dark" matches the dashboard's default; the in-page toggle switches to light
-# without consulting this value. Keeping it in step means the brief moment before
-# our stylesheet applies is dark too, rather than a white flash.
-base = "dark"
-primaryColor = "#3b9eff"
-backgroundColor = "#262624"
-secondaryBackgroundColor = "#1f1e1c"
-textColor = "#eceae4"
+# "light" matches the dashboard's default (DEFAULT_THEME in dashboard.py); the
+# in-page toggle switches to dark without consulting this value. Keeping the two
+# in step means the brief moment before our stylesheet applies is the same colour
+# as the page, rather than a flash of the other theme on every load. These are the
+# light palette's own values, copied from THEMES["light"], not an approximation.
+base = "light"
+primaryColor = "#c96442"
+backgroundColor = "#faf9f5"
+secondaryBackgroundColor = "#f0eee6"
+textColor = "#1f1e1d"
 font = "sans serif"
+
 
 [server]
 headless = true
+
 
 [browser]
 gatherUsageStats = false
