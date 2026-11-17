@@ -34,6 +34,8 @@ import numpy as np  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 ASSETS = Path(__file__).parent / "assets"
+# The uploads the icons are scaled from, per face.
+UPLOADS = {"idle": "husky-idle2.png", "think": "husky-think3.png"}
 DASHBOARD = str(Path(__file__).parent / "dashboard.py")
 LOG = Path(os.environ["FWEDDIE_DASHBOARD_LOG"])
 CHROMIUM_PORT = 9455
@@ -147,16 +149,12 @@ def test_icons_are_raster_and_two_tone() -> None:
     theme, and a white face alone is invisible on the light one, so both must be
     in the same file.
 
-    The aspect check is what the ASCII sources bring with them. A character cell
-    is taller than it is wide, so the source renders are already stretched; a
-    rebuild that re-renders at square cells comes out 1.82x too wide, which is a
-    squashed husky and easy to ship without noticing. The expected aspect is read
-    from the source art, not hardcoded, so re-exporting the art re-baselines it.
+    The aspect check is what the uploads bring with them. The two drawings are
+    not square and are not the same shape, so a rebuild that forces a square box
+    squashes one of them; the expected aspect is read from the upload, not
+    hardcoded, so re-exporting a drawing re-baselines it.
     """
     from PIL import Image
-
-    sys.path.insert(0, str(Path(__file__).parent / "tools"))
-    import make_husky
 
     idle_path = ASSETS / "husky-idle.png"
     think_path = ASSETS / "husky-think.png"
@@ -178,28 +176,34 @@ def test_icons_are_raster_and_two_tone() -> None:
         assert 0.30 < opaque.mean() < 0.95, (
             f"{name}: {opaque.mean():.2f} of the icon is drawn"
         )
-        face = opaque & (lum > 170)
-        ink = opaque & (lum < 120)
-        assert face.mean() > 0.10, f"{name}: no white face ({face.mean():.2f})"
-        assert ink.mean() > 0.10, f"{name}: no dark ink ({ink.mean():.2f})"
+        # Two-tone: a light backing under a darker drawing. The thinking face is
+        # blue rather than black, so this is a range check, not a threshold --
+        # dark ink alone is invisible on the dark theme, a light face alone on
+        # the light one, and both have to be in the same file.
+        face = opaque & (lum > 200)
+        ink = opaque & (lum < 180)
+        assert face.mean() > 0.10, f"{name}: no light backing ({face.mean():.2f})"
+        assert ink.mean() > 0.10, f"{name}: no darker drawing ({ink.mean():.2f})"
+        assert lum[opaque].max() - lum[opaque].min() > 60, f"{name}: flat, not two-tone"
         # Transparent margin on all four sides, or the icon is a crop that will
         # read as off-centre in a circle.
         assert not opaque[0].any() and not opaque[-1].any(), f"{name}: no top/bottom margin"
 
-        # Aspect: the drawn head must have the shape the ASCII art has, not the
-        # shape a square cell would give it.
-        drawn = opaque & (lum < 128)
-        ys, xs = np.nonzero(drawn)
+        # Aspect: the drawing must keep the shape its upload has, not a square
+        # one. The uploads are neither square nor alike, so a rebuild that forces
+        # a square box squashes one of them. The expected aspect is read from the
+        # upload, so re-exporting a drawing re-baselines the check.
+        ys, xs = np.nonzero(opaque)
         got = (xs.max() - xs.min() + 1) / (ys.max() - ys.min() + 1)
-        src = make_husky.load_ink(f"ascii-{name}")
-        ys2, xs2 = np.nonzero(src > 0.30)
+        src = np.asarray(Image.open(ASSETS / UPLOADS[name]).convert("RGBA")).astype(float)
+        ys2, xs2 = np.nonzero(src[..., 3] > 128)
         want = (xs2.max() - xs2.min() + 1) / (ys2.max() - ys2.min() + 1)
         assert abs(got - want) / want < 0.05, (
-            f"{name}: drawn aspect {got:.3f} but the ASCII art is {want:.3f} "
-            f"-- the cell aspect was not applied (square cells squash the head)"
+            f"{name}: icon aspect {got:.3f} but the upload is {want:.3f} "
+            f"-- the drawing was squashed into a square box"
         )
-    print("4. both faces are raster, differ, white under ink    OK")
-    print("   ...and keep the ASCII art's aspect, not a square-cell one  OK")
+    print("4. both faces are raster, differ, two-tone            OK")
+    print("   ...and keep their upload's aspect, not a square one  OK")
 
 
 # ---------------------------------------------------------------------------

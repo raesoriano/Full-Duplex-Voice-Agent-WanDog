@@ -858,81 +858,56 @@ unconditional `follow()` never runs. The check that guards this therefore append
 a turn from inside the browser session. The first version of that check appended
 before the browser started and passed against a deliberately broken script.
 
-## The husky icons are scaled from the ASCII art
+## The husky icons are scaled from the uploaded drawings
 
-Two faces, both scaled from the ASCII art in `assets/` (`ascii-idle.png` and
-`ascii-think.png`, kept so the icons can be rebuilt):
+Two faces, each scaled from a drawing in `assets/`:
 
-* `ascii-idle.png` -- mouth open, tongue out. The bar at rest, and the avatar
+* `husky-idle2.png` -- mouth open, tongue out. The bar at rest, and the avatar
   beside every reply.
-* `ascii-think.png` -- muzzle up. The bar while a turn is in flight.
+* `husky-think3.png` -- muzzle up. The bar while a turn is in flight.
 
-`tools/make_husky.py` regenerates `husky-idle.png`, `husky-think.png` and the
-`husky-32.png` favicon from them.
+`tools/make_husky.py` regenerates `husky-idle.png` and `husky-think.png` at
+192 px, and `husky-32.png` (the favicon) at 32 px, from those two. The uploads
+are kept because they are the sources: rebuilding reads them, not the icons.
 
-### The source is a halftone, so it is decoded before it is scaled
+### A plain resize, with one detail that needs care
 
-The two source files are renders of the ASCII art: one text glyph per cell, 100
-columns by 55 rows on a 6.59 x 12.00 px cell. That is a halftone -- the tone is
-carried by WHICH character sits in a cell, so the ink in a cell is a few thin
-strokes rather than a flat patch.
+The uploads are finished drawings, so this is a Lanczos resize and nothing more
+-- no decoding, no tracing, no re-rendering. The earlier version of this script
+decoded a halftone back to its cell grid first; that machinery is gone, because
+these files are not halftones. Downscaling them loses 0.1% of the ink mass at
+192 px and 2.9% at 30 px, which is an ordinary resample, not the 53% loss that
+made the old glyph renders unreadable.
 
-Downscaling such a render directly keeps the halftone. At 192 px the character
-texture is still visible; by 30 px it has aliased into flecks that read as dirt
-on the face. Measured on the idle head, a direct downscale leaves ink in 0.078 of
-the face at 192 px, against 0.167 of solid ink in the source.
+The detail is the alpha channel. Both drawings carry fully transparent pixels
+whose RGB is black, and resampling straight RGBA drags that black into the edge
+of every drawn pixel -- a dark halo around a face that is only ever shown 26-30
+px wide. So the resize premultiplies by alpha, runs Lanczos, then divides the
+alpha back out. Same pixels in the interior, clean edge at the rim.
 
-So the builder averages each cell to one density value first -- throwing the
-glyph shapes away and keeping the tone the artist drew -- then re-renders that
-100x55 grid as a continuous image. The tone window is calibrated so ink coverage
-stays flat as the size drops (0.256 of the face at 192 px, 0.268 at 30 px),
-which is what keeps the strokes from greying out at icon size.
+### Why rasters, and why two-tone
 
-### The cell aspect is measured, not assumed
+Rasters because the sources are raster, and tracing them to SVG produced blobs
+the first time round (the eyes fused with the muzzle). Two-tone because the
+icons sit on both themes: the light backing is what shows on the dark theme, the
+darker drawing is what shows on the light one, and both have to be in the same
+file. The thinking face's drawing is blue rather than black, so the test checks
+a luminance range, not a fixed ink colour.
 
-A character cell is taller than it is wide, so the source renders are already
-stretched: 12.00/6.59 = 1.82, which is the 1.84 the ASCII art itself implies.
-Re-rendering the decoded grid at square cells would undo that and give a husky
-1.82x too wide. The builder therefore reads the cell aspect off the source image
-and re-renders at that value, and both the builder and a test refuse to accept an
-icon whose drawn aspect has drifted from the source art's by more than 3%.
+### What the test pins
 
-### Why rasters, and not a traced SVG
-
-Tracing a raster this small to SVG produced blobs: the outline broke into
-fragments, the eyes fused with the muzzle, and the result read as a smudge. So
-the icons are PNGs at 6-7x the size they are drawn at, built with an alpha matte
-rather than a contour:
-
-* ink alpha is the inverse grey level, normalised to the art's own 99.5th
-  percentile so the tone window means the same thing for both heads;
-* the same matte, thresholded at 0.30, is flood-filled from the border to find
-  the SILHOUETTE, which is painted white underneath. Without it the icon is dark
-  ink on a dark page (invisible) or a bare outline on a light one;
-* the result is trimmed to the drawing and padded back to a square, so both faces
-  are the same size in the bar and neither has a cropped chin.
-
-### Three bugs this went through, each now pinned
-
-1. **The closing kernel sealed the background.** The silhouette needs a
-   morphological close, because both outlines have pinholes and the fill leaks
-   through them. But closing also grows the ink, and on a crop with little air the
-   grown outline reaches the border and traps the surrounding background in
-   pockets the corner fill can never enter -- the white face then covers the whole
-   rectangle and the icon is a white square. Fix: pad by the kernel width BEFORE
-   closing.
-2. **The kernels differ per icon.** Measured as the point where the filled
-   fraction stops growing: the idle head closes by k=9 (0.496 -> 0.508, flat
-   after), the thinking head's jaw leaves a gap at the throat that needs the full
-   9 (0.322 -> 0.553 by k=9). Below that the fill escapes and the face never
-   appears.
-3. **The two faces came out byte-identical.** The PNG renderer screenshotted one
-   page holding both icons at the window size of the FIRST one. Caught by
-   comparing the two files.
+`test_dashboard_layout.py` test 4: both icons exist and differ, roughly half the
+square is drawn with a transparent margin on every side, both a light backing
+and a darker drawing are present, and the drawn shape keeps the aspect of its
+upload. The last one is the check that catches a rebuild that forces a square
+box: the uploads are neither square nor alike (the idle drawing is taller than
+it is wide, the thinking one wider than it is tall), so squashing one is easy to
+ship without noticing. The expected aspect is read from the upload, not
+hardcoded, so re-exporting a drawing re-baselines the check.
 
 The PNGs are inlined as data URIs: there is no static route to `assets/`, and a
-data URI cannot 404 or go stale while an icon is being rebuilt. `assets/husky-32.png`
-remains the favicon, which Streamlit requires to be raster.
+data URI cannot 404 or go stale while an icon is being rebuilt.
+`assets/husky-32.png` remains the favicon, which Streamlit requires to be raster.
 
 ## The bar's face follows the turn
 
