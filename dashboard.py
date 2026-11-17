@@ -1090,6 +1090,39 @@ _AUTOSCROLL_JS = """
   W.addEventListener('resize', sync);
   W.addEventListener('load', sync);
   sync();
+
+  // --- Ctrl+Enter sends ---------------------------------------------------
+  // The text box is a plain st.text_input, and Streamlit gives it NO key
+  // handling of its own: pressing Enter in it does nothing at all, which is why
+  // typing and hitting Enter looked broken while the button worked. (In a
+  // st.chat_input Enter sends, but that widget cannot hold the mic and the
+  // Send/Stop beside it.) So the key is handled here instead.
+  //
+  // The listener goes on the document, not on the input: Streamlit throws the
+  // input away and builds a new one on every rerun, so a handler bound to the
+  // element would be lost the first time the page reran.
+  //
+  // Ctrl+Enter only -- plain Enter is deliberately left alone, and the
+  // keydown's default is NOT prevented, so Enter still inserts nothing
+  // surprising in a single-line box.
+  function isBox(el) {
+    if (!el || !el.tagName) return false;
+    return el.tagName === 'INPUT' && el.closest('.st-key-composer') !== null;
+  }
+
+  function sendBtn() {
+    var c = D.querySelector('.st-key-sendbtn');
+    return c ? c.querySelector('button') : null;
+  }
+
+  D.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Enter' || !(ev.ctrlKey || ev.metaKey)) return;
+    if (!isBox(ev.target)) return;
+    var b = sendBtn();
+    if (!b) return;              // busy: the control is Stop, so there is nothing to send
+    ev.preventDefault();         // no newline / no form submit from the key itself
+    b.click();                   // the button's own handler: same path as a mouse click
+  }, true);
 })();
 </script>
 """
@@ -1195,7 +1228,7 @@ with st.container(key="composer"):
             with st.container(key="sendbtn"):
                 send_clicked = st.button(
                     "", key="sendbtn_btn", icon=":material/arrow_upward:",
-                    help="Send (or press Enter)",
+                    help="Send (or press Ctrl+Enter)",
                 )
             if send_clicked:
                 text = (typed or "").strip()
