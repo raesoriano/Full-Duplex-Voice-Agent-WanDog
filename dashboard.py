@@ -423,20 +423,44 @@ header[data-testid="stHeader"] { display: none !important; }
     padding: .3rem .4rem;
     box-shadow: var(--fw-shadow);
 }
-/* The text field loses its own box: the pill above is the box. */
-.st-key-composer [data-testid="stTextInputRootElement"] {
+/* The text field loses its own box: the pill above is the box. Both selectors
+   are kept -- the textarea's testid and the input's -- so a revert to the
+   single-line widget would not silently get its own border back. */
+.st-key-composer [data-testid="stTextInputRootElement"],
+.st-key-composer [data-testid="stTextArea"] {
     background: transparent !important; border: none !important;
     box-shadow: none !important;
 }
-.st-key-composer [data-testid="stTextInputRootElement"] input {
+.st-key-composer [data-testid="stTextInputRootElement"] input,
+.st-key-composer [data-testid="stTextArea"] textarea {
     background: transparent !important; border: none !important;
     box-shadow: none !important; color: var(--fw-text) !important;
     padding-left: .35rem;
 }
-.st-key-composer [data-testid="stTextInputRootElement"] input::placeholder {
+.st-key-composer [data-testid="stTextInputRootElement"] input::placeholder,
+.st-key-composer [data-testid="stTextArea"] textarea::placeholder {
     color: var(--fw-faint) !important;
 }
-.st-key-composer [data-testid="stTextInputRootElement"] input:focus { box-shadow: none !important; }
+.st-key-composer [data-testid="stTextInputRootElement"] input:focus,
+.st-key-composer [data-testid="stTextArea"] textarea:focus {
+    box-shadow: none !important;
+}
+/* A textarea arrives with a drag handle and its own resize; both break the
+   pill. The box grows with the text instead (Streamlit auto-expands it).
+   The resting height is pinned here rather than through the widget's `height`
+   argument: that argument sets ROWS (height=44 still produced rows=3 and a
+   66 px box), and the pill then stood 78 px tall against the 46 px single-line
+   version it replaced. min-height is what the auto-expand measures from, so
+   both values have to agree. */
+.st-key-composer [data-testid="stTextArea"] textarea {
+    resize: none !important;
+    line-height: 1.45;
+    height: 2.1rem !important;
+    min-height: 2.1rem !important;
+    padding-top: .35rem !important; padding-bottom: .35rem !important;
+}
+.st-key-composer [data-testid="stTextArea"] > div { border: none !important;
+    background: transparent !important; box-shadow: none !important; }
 
 /* Buttons: circular and quiet. data-testid="stBaseButton-secondary" is the name
    Streamlit 1.67 actually emits for a plain st.button; a bare `button` element
@@ -1030,6 +1054,35 @@ _AUTOSCROLL_JS = """
 <script>
 (function () {
   var W = window.parent, D = W.document;
+
+  // The Ctrl+Enter backstop is installed BEFORE the one-shot guard below, and
+  // guarded separately, because the two have different lifetimes. The layout
+  // work must happen once; this listener must exist in every tab. It used to
+  // sit after `if (__fwLayout) return`, so a tab that had loaded the page before
+  // that line was added kept __fwLayout = true and never installed the
+  // listener -- Ctrl+Enter and Enter both did nothing there while the Send
+  // button, which is a real Streamlit widget, kept working. That is the report
+  // this fixes.
+  //
+  // It is a BACKSTOP, not the mechanism: st.text_area already commits on
+  // Ctrl+Enter itself. This only matters if that ever changes, and it fires on
+  // the capture phase so it wins before the widget's own handler.
+  if (!W.__fwKeys) {
+    W.__fwKeys = true;
+    D.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter' || !(ev.ctrlKey || ev.metaKey)) return;
+      var t = ev.target;
+      if (!t || t.tagName !== 'TEXTAREA') return;
+      if (!t.closest('.st-key-composer')) return;
+      // Let the widget commit the value itself. Clicking Send here would race
+      // the commit and send an empty string -- measured: the box cleared and
+      // the message was lost.
+      var b = D.querySelector('.st-key-sendbtn button');
+      if (!b) return;                       // busy: the control is Stop
+      setTimeout(function () { b.click(); }, 0);
+    }, true);
+  }
+
   if (W.__fwLayout) return;
   W.__fwLayout = true;
 
@@ -1091,38 +1144,6 @@ _AUTOSCROLL_JS = """
   W.addEventListener('load', sync);
   sync();
 
-  // --- Ctrl+Enter sends ---------------------------------------------------
-  // The text box is a plain st.text_input, and Streamlit gives it NO key
-  // handling of its own: pressing Enter in it does nothing at all, which is why
-  // typing and hitting Enter looked broken while the button worked. (In a
-  // st.chat_input Enter sends, but that widget cannot hold the mic and the
-  // Send/Stop beside it.) So the key is handled here instead.
-  //
-  // The listener goes on the document, not on the input: Streamlit throws the
-  // input away and builds a new one on every rerun, so a handler bound to the
-  // element would be lost the first time the page reran.
-  //
-  // Ctrl+Enter only -- plain Enter is deliberately left alone, and the
-  // keydown's default is NOT prevented, so Enter still inserts nothing
-  // surprising in a single-line box.
-  function isBox(el) {
-    if (!el || !el.tagName) return false;
-    return el.tagName === 'INPUT' && el.closest('.st-key-composer') !== null;
-  }
-
-  function sendBtn() {
-    var c = D.querySelector('.st-key-sendbtn');
-    return c ? c.querySelector('button') : null;
-  }
-
-  D.addEventListener('keydown', function (ev) {
-    if (ev.key !== 'Enter' || !(ev.ctrlKey || ev.metaKey)) return;
-    if (!isBox(ev.target)) return;
-    var b = sendBtn();
-    if (!b) return;              // busy: the control is Stop, so there is nothing to send
-    ev.preventDefault();         // no newline / no form submit from the key itself
-    b.click();                   // the button's own handler: same path as a mouse click
-  }, true);
 })();
 </script>
 """
@@ -1201,9 +1222,26 @@ with st.container(key="composer"):
         mic_button()
 
     with c_text:
-        typed = st.text_input(
+        # st.text_area, not st.text_input, and not because of looks. The input
+        # was a single-line <input>, which CANNOT hold a newline: there is no
+        # character in it that Enter could insert, so "Enter starts a new line"
+        # was unachievable with that widget. A textarea holds one.
+        #
+        # The key handling then comes free. Streamlit's textarea has a built-in
+        # keydown handler -- TextArea.js, `s = !a || metaKey || ctrlKey` with a
+        # = true -- which commits the value on Ctrl+Enter and leaves plain Enter
+        # to the browser, i.e. a newline. That is exactly the requested
+        # behaviour, so no listener of ours is needed for it. Ours also could
+        # not be relied on: it was installed after `if (__fwLayout) return`, so
+        # a tab opened before that script changed never got it at all -- which
+        # is why Ctrl+Enter did nothing while the button still worked.
+        #
+        # `enter_to_submit` does not exist on this widget, and `height` keeps the
+        # pill one line tall until the text wraps.
+        typed = st.text_area(
             "Message",
             key="txt",
+            height=44,
             label_visibility="collapsed",
             placeholder="Message Fweddie, or just start talking\u2026",
         )

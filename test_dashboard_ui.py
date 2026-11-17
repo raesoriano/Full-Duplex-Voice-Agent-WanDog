@@ -62,7 +62,7 @@ def test_send_writes_typed_and_clears_box() -> None:
     assert not list(at.exception), list(at.exception)
     assert "sendbtn_btn" in _keys(at), _keys(at)
 
-    at.text_input(key="txt").set_value("  what is the weather  ").run()
+    at.text_area(key="txt").set_value("  what is the weather  ").run()
     at.button(key="sendbtn_btn").click().run()
     assert not list(at.exception), list(at.exception)
 
@@ -71,7 +71,7 @@ def test_send_writes_typed_and_clears_box() -> None:
     # Stripped: a stray space from a paste must not become the prompt.
     assert payload["text"] == "what is the weather", payload
     assert payload.get("id"), payload
-    assert at.text_input(key="txt").value == "", "the box was not cleared"
+    assert at.text_area(key="txt").value == "", "the box was not cleared"
     print("1. Send writes the typed file and clears the box  OK")
 
 
@@ -79,7 +79,7 @@ def test_empty_send_does_nothing() -> None:
     _seed({"kind": "session_start", "ts": time.time()})
     TYPED.unlink(missing_ok=True)
     at = AppTest.from_file(DASHBOARD, default_timeout=60).run()
-    at.text_input(key="txt").set_value("   ").run()
+    at.text_area(key="txt").set_value("   ").run()
     at.button(key="sendbtn_btn").click().run()
     assert not list(at.exception), list(at.exception)
     assert not TYPED.exists(), "a whitespace-only message was sent"
