@@ -29,7 +29,7 @@ from pathlib import Path
 PIPER_VOICE_DIR = Path(os.environ.get("WANDOG_PIPER_DIR", "/home/raesoriano/.piper"))
 # Ryan (US English, medium quality). The ONNX model + its .onnx.json config
 # live in PIPER_VOICE_DIR; PiperTTSService downloads them on first use if they
-# are missing. 61 MB -- see "The TTS voice is Piper Ryan" in WanDog-notes.md.
+# are missing. 61 MB -- see "The TTS voice is Piper Ryan" in WanDog-Notes.md.
 PIPER_VOICE = os.environ.get("WANDOG_PIPER_VOICE", "en_US-ryan-medium")
 
 # ---------------------------------------------------------------------------

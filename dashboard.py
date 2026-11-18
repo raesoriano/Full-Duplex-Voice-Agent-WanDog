@@ -80,7 +80,7 @@ ASSETS = Path(__file__).parent / "assets"
 #   husky-think -- muzzle up. The bar's face while a turn is in flight.
 #   husky-32    -- the favicon.
 # Rasters, not SVG: tracing the drawings produced blobs (the eyes fused with the
-# muzzle). See "The husky icons are three committed PNGs" in WanDog-notes.md.
+# muzzle). See "The husky icons are three committed PNGs" in WanDog-Notes.md.
 HUSKY_IDLE_PNG = ASSETS / "husky-idle.png"
 HUSKY_THINK_PNG = ASSETS / "husky-think.png"
 

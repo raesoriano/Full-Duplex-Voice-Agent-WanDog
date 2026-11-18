@@ -2,10 +2,32 @@
 
 > **Started:** 2026-11-07 · **Machine:** Raspberry Pi 5, 8 GB, aarch64, Debian 13, no GPU
 > **Repo:** `WanDog-repo/` · **Venv:** `WanDog-repo/.venv` (Python 3.12.16, torch-free)
-> **Status:** **Working** (2026-11-17). The user confirmed on real hardware:
-> "this is working nicely." Streaming partials appear while speaking, the turn
-> closes ~0.9 s after speech end, and the answer is about the question just
-> asked. Pushed to GitHub at `f4836c85` and verified from a fresh clone.
+> **Status:** **Working** (2026-11-18). The user confirmed on real hardware on
+> 2026-11-17: "this is working nicely." Streaming partials appear while speaking,
+> the turn closes ~0.9 s after speech end, and the answer is about the question
+> just asked.
+> **HEAD:** `main` = `df786c3b` · `files` = `9800d94a` (**not yet merged**), 62 commits.
+
+This file is the **development log**: what was built, in what order, and every
+fault worth not repeating. The two registers that make it navigable are §21
+(features, each with the commit that added it) and §22 (issues, each with the
+commit that fixed it).
+
+### Contents
+
+| § | Topic | § | Topic |
+|---|---|---|---|
+| 1 | What this is | 12 | Turn handling & the silent-agent regression |
+| 2 | Components | 13 | Barge-in |
+| 3 | Features (core, v1) | 14 | Open questions / next steps |
+| 4 | Issues & challenges faced | 15 | TTS voice Piper Ryan, owner identity |
+| 5 | How to run | 16 | Wordless turns, mute, Ctrl+Enter |
+| 6 | Dependency notes (torch-free) | 17 | Time, GitHub, long tasks |
+| 7 | Safeguards (adapted from OnIt) | 18 | A repo the agent could create but not delete |
+| 8 | ASR (streaming) | 19 | "I have no tool for that" was false |
+| 9 | Dashboard (Streamlit, LAN) | 20 | `write_file` ran out of tokens |
+| 10 | Audio devices (pinned) | **21** | **Feature register, by commit** |
+| 11 | LLM: the endpoint | **22** | **Issue register, by commit** |
 
 ---
 
@@ -441,22 +463,31 @@ device). `config.py` sets `INPUT_DEVICE_INDEX=0` and `OUTPUT_DEVICE_INDEX=1`
 by default and passes them to `LocalAudioTransportParams`. Override with
 `WANDOG_IN_DEVICE` / `WANDOG_OUT_DEVICE` (an empty value = system default).
 
-## 11. LLM: DGX Qwen3.8-27B (post-Ollama-cloud)
-- Ollama ended its free cloud models, so the LLM is the on-prem DGX cluster:
-  `Qwen/Qwen3.8-27B` served by vLLM at `http://202.92.159.240:8001/v1`
-  (OpenAI-compatible).
-- **API key lives in the OS keychain** (gnome-keyring, service `onit`, entry
-  `endpoint_key:http://202.92.159.240:8001/v1`) — stored by `onit setup`,
-  resolved by `config.resolve_llm_api_key()` (env → keychain →
-  `~/.onit/secrets.yaml` → `OPENAI_API_KEY`). No export needed at run time.
-- **Thinking disabled by default.** Qwen3.8 is a thinking model: with thinking
-  on, vLLM returns empty `content` (the reasoning goes to a separate field),
-  which would make the voice agent silent. `agent.py` therefore adds
+## 11. LLM: the endpoint
+
+> **Corrected 2026-11-18.** This section used to say the LLM was the on-prem DGX
+> cluster (`Qwen/Qwen3.8-27B` at `http://202.92.159.240:8001/v1`). That is no
+> longer what runs. `config.py` defaults to **`gemma4:31b-cloud`** at
+> **`https://ollama.com/v1`**. The Qwen/DGX path still works when overridden
+> with `ONIT_LLM_BASE_URL` / `ONIT_LLM_MODEL`, and the keychain entry for it is
+> still present — but the default is Ollama cloud.
+
+- Current default: `LLM_BASE_URL = https://ollama.com/v1`,
+  `LLM_MODEL = gemma4:31b-cloud`.
+- The URL matters: `https://ollama.com/v1` is canonical and answers 200;
+  `https://api.ollama.com/v1` 301-redirects to it, and `https://api.ollama.com`
+  301s to a 404. That last form was an original failure worth not repeating.
+- **Thinking disabled by default.** The Qwen path needed this: it is a thinking
+  model and with thinking on vLLM returns empty `content` (the reasoning goes to
+  a separate field), which makes the voice agent silent. `agent.py` adds
   `extra_body={"chat_template_kwargs": {"enable_thinking": false}}`;
-  `ONIT_LLM_THINKING=1` restores the model default.
+  `ONIT_LLM_THINKING=1` restores the model default. Harmless on the Ollama path.
+- **API key** resolves through `config.resolve_llm_api_key()`: env →
+  OS keychain (service `onit`, entry `endpoint_key:<base_url>`) →
+  `~/.onit/secrets.yaml` → `OPENAI_API_KEY`. A key stored once via `onit setup`
+  is picked up with no manual export.
 - Verified end-to-end: `test_llm_live.py` builds pipecat's `OpenAILLMService`
-  exactly as `agent.py` does (keychain key, thinking off) and gets a real
-  reply from the DGX model.
+  exactly as `agent.py` does and gets a real reply.
 
 ## 12. Turn handling & the silent-agent regression (fixed 2026-11-17)
 
@@ -1039,7 +1070,7 @@ tool need.
 ### The rename
 
 `Fweddie` became `WanDog` everywhere: 26 tracked files, `FweddieLogger` ->
-`WanDogLogger`, `Fweddie-notes.md` -> `WanDog-notes.md`, and the configuration
+`WanDogLogger`, `Fweddie-notes.md` -> `WanDog-Notes.md`, and the configuration
 prefix `FWEDDIE_` -> `WANDOG_` (53 distinct knobs, 99 occurrences). The GitHub repo was
 renamed `Full-Duplex-Voice-Agent-Fweddie` -> `Full-Duplex-Voice-Agent-WanDog`
 (GitHub redirects the old URL, so an existing clone still fetches), and the
@@ -1523,3 +1554,73 @@ logging, and the prompt wording. `test_tool_parity`, `test_tool_secrets`,
 `test_tool_result`, `test_results_cap`, `test_clock`, `test_guard`,
 `test_turn_context`, `test_eventbus`, `test_muted_turn` and
 `test_ctrl_enter_interrupt` all still pass.
+## 21. Feature register, by commit
+
+Every feature in the running agent, with the commit that added it and the
+section that explains it. `git show <hash>` is the full argument.
+
+| Feature                                      | Commit   | See    |
+|----------------------------------------------|----------|--------|
+| Full-duplex voice loop: VAD -> LLM -> TTS    | 175d90c8 | 1, 2   |
+| Torch-free VAD via onnxruntime               | b31ee5e5 | 2, 6   |
+| LLM key resolved as OnIt does (no export)    | 759d96dd | 3, 11  |
+| Approval gate / safeguards from OnIt         | 647e1da9 | 7      |
+| Local ASR (faster-whisper) + LAN dashboard   | 55fd9bdb | 8, 9   |
+| Audio devices pinned by index                | 8e8dc7e8 | 10     |
+| Web search tool reachable by the model       | 40e4de8f | 11b    |
+| Barge-in: user speech interrupts the bot     | 5281e0b5 | 13     |
+| README + fd-benchmark suite                  | 726bac17 | README |
+| Streaming ASR: text while still speaking     | 640798ac | 8, 12  |
+| News served by Tavily, not ddgs              | 3d1333dd | 11b    |
+| News freshness refresh + retry budget        | bad13039 | 11b    |
+| Search results dated and readable            | 0850bb2a | 11b    |
+| Prompt clock carries date AND time           | 33861ac5 | 17     |
+| Tool use is spoken: call, then outcome       | bd7d8825 | 12     |
+| Tool secrets from secrets.yaml               | e2f3c119 | 7      |
+| Model result cap 1 200 -> 24 000 chars       | 33e92b12 | 11b    |
+| Cut results tell the model they were cut     | 3ac4ea49 | 11b    |
+| One VAD analyzer per consumer                | ae567ee9 | 12     |
+| Dashboard: Ollama-style chat, typing, Stop   | fe5bb202 | 9      |
+| Light/dark switch, tintable mic, Clear       | 6f617c27 | 9      |
+| Sticky bar, measured transcript, husky       | 22752df6 | 9      |
+| Ctrl+Enter sends; Enter makes a newline      | f55b90bd | 9      |
+| Default light; Send no longer sticks on Stop | 9211480f | 9      |
+| Piper Ryan voice + owner identity block      | 36d7337e | 15     |
+| Rename Fweddie -> WanDog, venv path          | 36d7337e | 15     |
+| Wordless turn ends; mute persists            | 7cb8fbd5 | 16     |
+| Ctrl+Enter interrupts the bot                | 7cb8fbd5 | 16     |
+| Prompt states GitHub, long tasks, clock      | 199fcb2c | 17     |
+| github_repo qualifies a bare repo name       | 06e809c7 | 18     |
+| Prompt: Pages via curl, not 'I cannot'       | df786c3b | 19     |
+| Tool-call token budget separate from speech  | 9800d94a | 20     |
+
+## 22. Issue register, by commit
+
+Every fault that cost real time, with the commit that fixed it. A fault with
+no commit here is still open -- see §14.
+
+| Issue                                         | Fixed in | See   |
+|-----------------------------------------------|----------|-------|
+| Pipecat 1.15 API differs from the old docs    | 5281e0b5 | 4     |
+| Agent silent; blank dashboard; mic too hot    | c9760693 | 12    |
+| Pipeline never started; VAD ordered after STT | 0fc1dcec | 12    |
+| Two LLMContexts split one turn in two         | 491f6e59 | 12    |
+| Mic gain forced to 100% at every startup      | a1372ad2 | 10    |
+| Partial-transcript tap stalled the pipeline   | f9088cdd | 8, 12 |
+| Dashboard crashed on every tool result        | 45aeeee9 | 9     |
+| Model search handed an empty result           | 4f3d4727 | 11b   |
+| Search results arrived undated                | 0850bb2a | 11b   |
+| Clock gave the date but not the time          | 33861ac5 | 17    |
+| Self-echo: speaker placement, not AEC         | 48b828b3 | 13    |
+| News returned last week's stories             | bad13039 | 11b   |
+| Mic cancelled the agent's own searches        | 3d1333dd | 11b   |
+| Results clipped at 1 200 chars, silently      | 33e92b12 | 11b   |
+| One pause split a sentence into two turns     | ae567ee9 | 12    |
+| Send button stuck on Stop                     | 9211480f | 9     |
+| Enter did nothing in the text box             | 00aa5c10 | 9     |
+| Download command failed in a fresh clone      | f4836c85 | 5     |
+| A wordless turn never ended                   | 7cb8fbd5 | 16    |
+| A persisted mute did not mute                 | 7cb8fbd5 | 16    |
+| GitHub delete 404'd on a bare repo name       | 06e809c7 | 18    |
+| "I have no tool for that" was false           | df786c3b | 19    |
+| write_file dropped path: token budget         | 9800d94a | 20    |

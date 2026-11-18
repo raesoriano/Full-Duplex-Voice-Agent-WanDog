@@ -259,4 +259,4 @@ The mic is blue while the agent is accepting audio and monochrome while muted.
 - **Framework:** [Pipecat](https://github.com/pipecat-ai/pipecat)
 - **TTS:** [Piper](https://github.com/rhasspy/piper)
 - **VAD:** [Silero VAD](https://github.com/snakers4/silero-vad)
-- **Internal Docs:** `WanDog-notes.md` (Detailed development log)
+- **Internal Docs:** `WanDog-Notes.md` (Detailed development log)

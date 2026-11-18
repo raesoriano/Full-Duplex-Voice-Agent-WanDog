@@ -716,7 +716,7 @@ Task 4 (dashboard UI) ──► Task 5 (upload + mode)  [plan only]
 `main` stays at `f4836c85`. Every task above lands on `next-steps` as its own commit
 with the test that proves it, so any single task can be reverted without touching the
 others. The first commit on `next-steps` should be this plan plus the two doc edits
-the handover left uncommitted (`WanDog-notes.md`, `README.md`), so the branch starts
+the handover left uncommitted (`WanDog-Notes.md`, `README.md`), so the branch starts
 clean and the diff for each task stands alone.
 
 ## 8. What this plan does not do
