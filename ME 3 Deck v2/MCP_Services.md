@@ -37,10 +37,13 @@ shell, files, search and GitHub, with no home-automation or task-tracking schema
 
 ## Two things about the bridge worth knowing
 
-**The result cap is structural, not a slice.** `MCP_MODEL_RESULT_CHARS` is 24,000
+**The result cap is structural, not a slice.** `MCP_MODEL_RESULT_CHARS` is 8,000
 and `_cap_for_model` keeps whole results, saying how many were dropped. At the
 old 1,200 a five-result news payload arrived as 2 of 5 results, with the
-`date` field cut — the model could not tell old news from new.
+`date` field cut — the model could not tell old news from new. The cap can sit
+at 8,000 because `_CAP_CLIP_LADDER` now has rungs at 4,000/3,000/2,000: before
+them, a result one char over the cap fell to 700, which is what made 24,000 look
+necessary.
 
 **The recency rule is in two places on purpose.** The prompt tells the model to
 pass `type="news"`; `MCP_NEWS_AUTODETECT` sets the argument when it forgets.

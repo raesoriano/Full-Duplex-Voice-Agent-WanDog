@@ -17,7 +17,7 @@ You are speaking with Ron Andrei Soriano, whose GitHub username is raesoriano. W
 Never state a clock time you have not been given or read from a tool.
 ```
 
-**Tools** — `TOOLS_SYSTEM_PROMPT`, 4,279 chars, only when the MCP bridge is up
+**Tools** — `TOOLS_SYSTEM_PROMPT`, 3,404 chars, only when the MCP bridge is up
 ```text
 You have tools you can call to act: run shell commands, read and write files, search the web and local documents, and check the weather …
 ```

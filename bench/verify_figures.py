@@ -59,6 +59,13 @@ CF = rescore["counterfactual"]
 WER = rescore["wer"]
 CTX = results["metrics"]["course.context"]
 
+# The assembled system prompt, joined exactly as agent.py:709-712 does. Needed
+# because course.context measures the message list only -- the prompt is on
+# system_instruction and never appears in it.
+PROMPT = (config.SYSTEM_PROMPT + " " + config.OWNER_PROMPT + " "
+          + config.clock_line() + " " + config.CLOCK_GUARD + " "
+          + config.TOOLS_SYSTEM_PROMPT).strip()
+
 
 def f(key: str, field: str = "value") -> float:
     return float(metrics[key][field])
@@ -151,6 +158,17 @@ FIGURES: dict[str, tuple[str, list[str], str]] = {
                    "results.json course.context tokens_median"),
     "ctx_calls": (f"{int(CTX['n'])}", ["context_engineering.md"],
                   "results.json course.context n"),
+    # The prompt is NOT part of course.context: _context_size sums ctx.messages,
+    # and the prompt rides on system_instruction (pipecat_marks.py:54-74). Every
+    # row labelled "tokens per call" therefore understated the request by the
+    # whole prompt. These two are the real input, conversation + prompt at 4
+    # chars/token.
+    "ctx_input_median": (f"{int(round(CTX['tokens_median'] + len(PROMPT) / 4)):,}",
+                         ["context_engineering.md"],
+                         "course.context tokens_median + len(assembled prompt)/4"),
+    "ctx_input_max": (f"{int(round(CTX['tokens_last'] + len(PROMPT) / 4)):,}",
+                      ["context_engineering.md"],
+                      "course.context tokens_last + len(assembled prompt)/4"),
     # --- derived from the same run -----------------------------------------
     "endpointing_p95": (s(f("course.endpointing", "p95")), ["Evaluation_Benchmark.md"],
                         "results.csv course.endpointing p95"),
@@ -291,7 +309,7 @@ def check(verbose: bool = True) -> list[str]:
             problems.append("prompt_full.md: the assembled string does not match "
                             "agent.py:709-712")
         if verbose:
-            print(f"{'prompt':<16}{'5,015 chars':<14}config.py, joined as agent.py does")
+            print(f"{'prompt':<16}{f'{len(assembled):,} chars':<14}config.py, joined as agent.py does")
     if "prompt.md" in files:
         if len(files["prompt.md"]) > 2200:
             problems.append(f"prompt.md: {len(files['prompt.md'])} chars, over the "

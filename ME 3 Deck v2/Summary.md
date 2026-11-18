@@ -57,9 +57,9 @@ One fault per row, the fix, and the measurement that proves the fix worked.
 | 2 | **The agent split one question into two at every pause.** One VAD analyzer shared between the `VADProcessor` and the user aggregator, so every 32 ms window was counted twice and every gate ran at half its value | One analyzer per consumer | Fed once → stop 0.710 s (as configured); fed twice → **0.330 s**, and the question split |
 | 3 | **Silent while the LLM had answered.** The assistant aggregator sat between the LLM and the TTS and consumed `LLMTextFrame` | Canonical order `llm → tts → output → assistant_agg` | TTS receives text; replies are audible |
 | 4 | **Deaf with tools off.** Barge-in was only wired when a tool bridge existed, so the default no-tools configuration had no `InterruptionFrame` | Build the user aggregator unconditionally | Barge-in 0.48 s with tools off — the configuration the benchmark runs |
-| 5 | **Tool results were being truncated, losing the answer.** A blind 1,200-character slice dropped most of a 5-result payload and cut the `date` field | Structural cap at 24,000 chars, keeping whole results and reporting dropped ones | ddgs news 2 of 5 → **5 of 5**; Tavily 2 of 5 → **5 of 5**; `read_file` clipped → whole |
+| 5 | **Tool results were being truncated, losing the answer.** A blind 1,200-character slice dropped most of a 5-result payload and cut the `date` field | Structural cap, keeping whole results and reporting dropped ones; now 8,000 with a 4,000/3,000/2,000 ladder | ddgs news 2 of 5 → **5 of 5**; Tavily 2 of 5 → **5 of 5**; a 12,094-char `read_file` keeps 4,001 instead of 701 |
 | 6 | **The agent cancelled the searches it had just announced.** With no AEC its own "Searching for that." came back through the mic and raised a VAD turn start | `FunctionCallUserMuteStrategy` for the duration of a call | 5 of the 7 cancelled tool calls were self-inflicted; the announcement no longer cancels, and barge-in on answers is untouched |
-| 7 | **The model never passed `type="news"`** — every search hit the general index, whose results carry no date, so "the latest" was unanswerable | Recency guidance in the prompt **and** `MCP_NEWS_AUTODETECT` | Searches return dated results; the prompt rule and the argument default cover the model forgetting |
+| 7 | **The model never passed `type="news"`** — every search hit the general index, whose results carry no date, so "the latest" was unanswerable | `MCP_NEWS_AUTODETECT` and `_shape_search_args` set the argument, `_sort_news` orders newest-first | Searches return dated results even when the model omits `type`; the prompt keeps only "say the date, do not overclaim" |
 
 ### What did not get fixed, and is worth saying
 
@@ -68,8 +68,11 @@ Missed turn-taking is 0 %. WanDog has no notion of *address*. The run used 2 of
 the 40 `false_tt` clips on disk, so that is 100 % of two, not of forty — raising
 `per_round` in `suites.py` is the first next step.
 
-**The context is never trimmed.** It grew 7 → 1,674 tokens and was never pruned.
-Past the endpoint's ceiling the turn goes silent rather than short.
+**The context is never trimmed.** It grew 7 → 1,674 conversation tokens and was
+never pruned. Past the endpoint's ceiling the turn goes silent rather than
+short. Pipecat already ships the trim — `LLMContextSummarizer`, default
+thresholds 8,000 tokens / 20 messages — but `enable_auto_context_summarization`
+is `False`, so it is off.
 
 ## References
 
