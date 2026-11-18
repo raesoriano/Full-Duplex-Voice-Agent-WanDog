@@ -1593,34 +1593,272 @@ section that explains it. `git show <hash>` is the full argument.
 | github_repo qualifies a bare repo name       | 06e809c7 | 18     |
 | Prompt: Pages via curl, not 'I cannot'       | df786c3b | 19     |
 | Tool-call token budget separate from speech  | 9800d94a | 20     |
+| Sessions: continue by default, restart flag  | 97956495 | 23     |
+| Per-session tool jail (data_path per call)   | 97956495 | 23     |
+| Handover notes, compacted at exit            | 97956495 | 23     |
+| Chat history replayed on continue            | 97956495 | 23     |
+| File upload into the session folder          | 97956495 | 23     |
+| strict/session/expanded search tiers         | 97956495 | 23     |
 
 ## 22. Issue register, by commit
 
 Every fault that cost real time, with the commit that fixed it. A fault with
 no commit here is still open -- see §14.
 
-| Issue                                         | Fixed in | See   |
-|-----------------------------------------------|----------|-------|
-| Pipecat 1.15 API differs from the old docs    | 5281e0b5 | 4     |
-| Agent silent; blank dashboard; mic too hot    | c9760693 | 12    |
-| Pipeline never started; VAD ordered after STT | 0fc1dcec | 12    |
-| Two LLMContexts split one turn in two         | 491f6e59 | 12    |
-| Mic gain forced to 100% at every startup      | a1372ad2 | 10    |
-| Partial-transcript tap stalled the pipeline   | f9088cdd | 8, 12 |
-| Dashboard crashed on every tool result        | 45aeeee9 | 9     |
-| Model search handed an empty result           | 4f3d4727 | 11b   |
-| Search results arrived undated                | 0850bb2a | 11b   |
-| Clock gave the date but not the time          | 33861ac5 | 17    |
-| Self-echo: speaker placement, not AEC         | 48b828b3 | 13    |
-| News returned last week's stories             | bad13039 | 11b   |
-| Mic cancelled the agent's own searches        | 3d1333dd | 11b   |
-| Results clipped at 1 200 chars, silently      | 33e92b12 | 11b   |
-| One pause split a sentence into two turns     | ae567ee9 | 12    |
-| Send button stuck on Stop                     | 9211480f | 9     |
-| Enter did nothing in the text box             | 00aa5c10 | 9     |
-| Download command failed in a fresh clone      | f4836c85 | 5     |
-| A wordless turn never ended                   | 7cb8fbd5 | 16    |
-| A persisted mute did not mute                 | 7cb8fbd5 | 16    |
-| GitHub delete 404'd on a bare repo name       | 06e809c7 | 18    |
-| "I have no tool for that" was false           | df786c3b | 19    |
-| write_file dropped path: token budget         | 9800d94a | 20    |
+| Issue                                          | Fixed in | See   |
+|------------------------------------------------|----------|-------|
+| Pipecat 1.15 API differs from the old docs     | 5281e0b5 | 4     |
+| Agent silent; blank dashboard; mic too hot     | c9760693 | 12    |
+| Pipeline never started; VAD ordered after STT  | 0fc1dcec | 12    |
+| Two LLMContexts split one turn in two          | 491f6e59 | 12    |
+| Mic gain forced to 100% at every startup       | a1372ad2 | 10    |
+| Partial-transcript tap stalled the pipeline    | f9088cdd | 8, 12 |
+| Dashboard crashed on every tool result         | 45aeeee9 | 9     |
+| Model search handed an empty result            | 4f3d4727 | 11b   |
+| Search results arrived undated                 | 0850bb2a | 11b   |
+| Clock gave the date but not the time           | 33861ac5 | 17    |
+| Self-echo: speaker placement, not AEC          | 48b828b3 | 13    |
+| News returned last week's stories              | bad13039 | 11b   |
+| Mic cancelled the agent's own searches         | 3d1333dd | 11b   |
+| Results clipped at 1 200 chars, silently       | 33e92b12 | 11b   |
+| One pause split a sentence into two turns      | ae567ee9 | 12    |
+| Send button stuck on Stop                      | 9211480f | 9     |
+| Enter did nothing in the text box              | 00aa5c10 | 9     |
+| Download command failed in a fresh clone       | f4836c85 | 5     |
+| A wordless turn never ended                    | 7cb8fbd5 | 16    |
+| A persisted mute did not mute                  | 7cb8fbd5 | 16    |
+| GitHub delete 404'd on a bare repo name        | 06e809c7 | 18    |
+| "I have no tool for that" was false            | df786c3b | 19    |
+| write_file dropped path: token budget          | 9800d94a | 20    |
+| A session folder created by every import       | 97956495 | 23    |
+| dashboard: local `session` shadowed the import | 97956495 | 23    |
+| Widening the search tier was impossible        | 97956495 | 23    |
+| apply_search_mode: ToolsSchema, not a list     | 97956495 | 23    |
+| DOCUMENTS_PATH set; servers read ONIT_*        | 97956495 | 23    |
+| Sessions rooted in /tmp (lost on reboot)       | 97956495 | 23    |
+
+## 23. Sessions: one folder per conversation, and an upload that asks first
+
+Built 2026-11-18 on branch `file-upload` (`97956495`). Implements `NEXT-STEPS.md`
+§5, which had been plan-only.
+
+### What the feature is
+
+One session is one folder. The agent continues the last session by default;
+`--restart-session` starts a new one with an empty chat history. An uploaded file
+lands in that folder, and the folder is the boundary the session's tools are
+confined to. A notes file per session holds a handover summary, so a later
+session can read what happened in an earlier one.
+
+```
+.venv/bin/python agent.py                       # continue the last session
+.venv/bin/python agent.py --restart-session     # start a new one
+```
+
+```
+wandog-sessions/                 <- MCP_DATA_PATH (the jail root)
+  .current                       pointer: the live session id
+  <id>/                          e.g. 2026-11-18T1620-a3f1
+    meta.json                    id, started, model, mode, uploads[]
+    events.jsonl                 the log the dashboard tails
+    notes/session.md             handover record
+    work/                        <- injected as data_path: the tool jail
+      uploads/  created/  tool-results/
+```
+
+### The three corrections the plan needed
+
+**The root is not `/tmp`.** The plan put sessions under `/tmp/onit/data/sessions/`.
+`/tmp` is tmpfs on this host (`findmnt -no FSTYPE,TARGET /tmp` → `tmpfs`), so it
+is RAM: the folder, the log and the handover notes would all be wiped on reboot.
+That makes "continues the previous session by default" false exactly when someone
+comes back to it, and destroys the one artefact the feature exists to produce. It
+had already happened in this project — the 15:20 reboot took the event log and
+four test fixtures with it.
+
+The root is now `../wandog-sessions` relative to the checkout, derived from
+`__file__` rather than hardcoded, so it is durable, portable to another clone, and
+outside the repo so it is never committed and `git clean` cannot delete a
+person's work. `WANDOG_SESSIONS_ROOT` overrides it.
+
+The consequence worth knowing: moving or re-cloning the repo does not move the
+sessions with it. "My sessions are gone" is almost always "I cloned somewhere
+else".
+
+**The jail root had to become the sessions root.** The plan kept `MCP_DATA_PATH`
+flat and put session folders inside it, on the reasoning that a session folder is
+*inside* the jail rather than a new jail. That reasoning is right about the
+mechanism and wrong about the effect: one shared jail cannot confine a session,
+because every session sits in the same boundary.
+
+OnIt's servers accept a per-call `data_path` and enforce it as the boundary —
+but only when it sits inside the server-wide `DATA_PATH`:
+
+```python
+if base != abs_data and not base.startswith(abs_data + os.sep):
+    raise ValueError("data_path must be within the server data directory")
+```
+
+So the root has to *contain* every session for a session to be its own jail. With
+`MCP_DATA_PATH = <sessions root>`, `mcp_bridge` injects `data_path=<session>/work`
+on every call whose schema declares the parameter, and one session cannot read a
+sibling's files. That is stronger than the plan, which never attempted separation.
+
+The injection is per tool, not blanket: OnIt's server validates arguments against
+the tool's schema, so sending `data_path` to a tool that does not declare it is a
+hard rejection. The bridge records which tools accept it at discovery time.
+
+**The tier filter had to run from the full tool list.** This was a real bug found
+by a test, not a design preference. Narrowing to `strict` removes the web tools
+from the `LLMContext`. Filtering *the context's* tools on the next change
+therefore found nothing to restore, and the change was one-way: strict worked,
+and nothing could ever widen again. `apply_search_mode` now filters from
+`bridge.tools` — the complete set the pipeline was built with — every time.
+
+### The middle tier was free
+
+The user's hierarchy is: the uploaded file, then the other files in this session,
+then the web. Three tiers, narrowest first:
+
+| Tier       | Reaches                      | Tools offered              |
+|------------|------------------------------|----------------------------|
+| `strict`   | only the uploaded file       | file tools only            |
+| `session`  | + the rest of this session   | + `local_search` (default) |
+| `expanded` | + the web                    | everything                 |
+
+`local_search` already indexes the session base directory when given a
+`data_path`, so "search the other files in this session" needed no new code. Only
+the two ends of the ladder are new work.
+
+Enforcement is by tool removal, not by asking the model nicely — the same
+principle as the approval Guard. `context.tools` is a `ToolsSchema`, and Pipecat's
+OpenAI adapter reads it on every request, so `set_tools` changes what the next
+request carries without rebuilding the pipeline. The prompt is the second half:
+it says what to say when the answer is not in the file ("that isn't in
+report.pdf"), and that widening is the user's decision.
+
+A tier change is matched deterministically in the harness
+(`session.mode_from_text`), not inferred by the model: a permission change the
+model can talk itself out of is not a permission change. It is recorded in
+`meta.json` and in the event log, and the dashboard shows a caption whenever the
+tier is not the default, because a limit you cannot see is indistinguishable from
+the agent not knowing something.
+
+### Continuity means replaying the log
+
+Continuing a session has two halves. Files are free — the folder is reused. Chat
+history is not: the context is in-memory, so a restart starts blank.
+
+`session.read_turns` replays the last 20 `user_text`/`bot_text` events into
+`context.set_messages`. Tool traffic is deliberately *not* reconstructed — it is
+not cleanly rebuildable as messages, and the duplicated-system-prompt bug
+documented at `agent.py:838` is exactly what happens when the context is handed
+something it should not have. A continued session remembers what was said, not
+every tool's raw output. Replay stops at the most recent `cleared` event, so Clear
+still means clear.
+
+A restarted session replays nothing, so "clear chat history" falls out of the flag
+for free, with no clear-file involved.
+
+### The notes file is written twice over
+
+`notes/session.md` has two writers on purpose:
+
+1. One line per turn as the turn lands, written immediately, so a hard kill — a
+   power cut, a SIGKILL — still leaves a record of what was said.
+2. A compaction on shutdown that replaces those running lines with a summary:
+   session id, times, model, tier, uploads, what was asked, what was answered.
+
+Replacing rather than appending is the point. A summary that grows forever is a
+transcript, and the reason to compact is that the next reader should not have to
+read one.
+
+`notes/` sits outside `work/` deliberately: the agent writes it in-process, so a
+session's own file tools can neither rewrite its log nor edit its history. That is
+the "separate folder from the temporary folder" the requirement asked for, made
+literal.
+
+### Who mints a session
+
+Only the agent. The dashboard follows the pointer the agent wrote. Otherwise
+opening the dashboard first would mint an empty session that the agent then
+adopts, and the "new session" the user asked for by restart would be
+indistinguishable from one the dashboard made by accident.
+
+And only on *running* WanDog, not on importing it. Without that rule every test
+that does `import config` would leave a session folder beside the checkout — which
+is exactly what happened on the first run of the suite, and why
+`session._may_mint()` exists. `sys.argv[0]` is what distinguishes the two entry
+points: `streamlit run dashboard.py` puts streamlit there, `python agent.py` puts
+`agent.py` there.
+
+### The upload
+
+The composer's attach control was a disabled placeholder (`attachph`, "coming
+soon"). It is now a popover holding `st.file_uploader` — a popover rather than a
+bare dropzone because the composer is one row of controls and the layout test's
+geometry assertions depend on its height.
+
+The file is written by the **dashboard**, into the session's `work/uploads/` —
+already inside the agent's jail — so the agent reads it with `read_file` like any
+other file rather than receiving its bytes through a control file. What travels
+through `<log>.upload.json` is the name, which is all the spoken question needs.
+
+Refused with a sentence a person can hear: over 2 MB, an extension outside the
+allowlist, an empty file, a name that traverses. A same-named upload is numbered
+rather than overwriting the file the agent was told to answer from.
+
+An upload is not a silent ingestion. The agent says which file it has and asks
+what it may use — spoken as a `TTSSpeakFrame` literal, not through the LLM,
+because the question is fixed and letting the model paraphrase it risks it
+answering the upload as if the upload were the request.
+
+### Issues hit while building
+
+| Issue | Cause | Fixed by |
+|---|---|---|
+| Every `import config` left a session folder beside the checkout | `activate()` minted on import, and any process counts as an entry point | `session._may_mint()`: agent only, and only from `agent.py` |
+| `dashboard.py` crashed with `'NoneType' has no attribute 'UPLOAD_MAX_BYTES'` | the module already binds a local `session` (the `session_start` event), shadowing the import | import as `sess` |
+| `--restart-session` was ignored in the launch test | the harness overwrote `sys.argv` and dropped the flag | rebuild `argv` as `["agent.py"] + sys.argv[1:]` |
+| Widening the tier was impossible | filtering the context's current tools, not the bridge's full list | filter from `bridge.tools` |
+| `apply_search_mode` raised `Unsupported tool type` | `context.tools` is a `ToolsSchema`, not a list; the callables live on `.direct_functions` | unwrap `.function`, hand back the callables |
+| `test_dashboard_ui` asserted attach was a *disabled button* | it was, until the feature landed | assert the uploader is present instead |
+| `mcp_bridge` set `DOCUMENTS_PATH`; nothing read it | all three servers read `ONIT_DOCUMENTS_PATH` | renamed; harmless until now only because it defaulted to empty |
+
+Two pre-existing failures were confirmed against unmodified `HEAD` rather than
+assumed: `test_ctrl_enter_interrupt.py` (the composer never shows a busy state)
+and `test_pipeline_asr.py` / `test_vad_shared_state.py` (missing `/tmp` fixtures,
+skipped). Neither is caused by this work.
+
+### Tests
+
+| Test | Asserts |
+|---|---|
+| `test_session.py` | pointer round-trip; restart mints and the old folder survives; the dashboard never mints; traversal refused; `config` derives every path from the live session |
+| `test_session_launch.py` | the same through four real launches of `agent.py`: folder, log and jail each time |
+| `test_session_jail.py` | `data_path` injected only where declared, the model's value overwritten, and a real spawned OnIt server refusing a sibling's file |
+| `test_session_replay.py` | 3 turns replay as 6 messages; restart replays 0; a `cleared` event truncates; a corrupt line is skipped; notes append per turn and compact on shutdown |
+| `test_upload.py` | size/type/traversal refusals; the strict prompt; the tier phrases; `set_tools` really removing and restoring the web tools |
+| `test_upload_e2e.py` | the join: dashboard stores the file, the real watcher consumes the control file once, the agent speaks the question rather than ingesting silently |
+
+`test_dashboard_ui`, `test_dashboard_layout`, `test_dashboard_controls`,
+`test_eventbus`, `test_guard`, `test_clock`, `test_turn_context`,
+`test_tool_guidance`, `test_results_cap`, `test_tool_parity`, `test_bargein` and
+`test_muted_turn` all still pass.
+
+### Still not built
+
+The sidebar, session switching, and reading another session's notes on request —
+parked by request. Every session's folder is already on disk, so the sidebar is a
+reader over folders that exist.
+
+Reading a *sibling's* notes is the one piece with a real constraint: the jail
+forbids it by design, so it cannot go through a tool. It has to be in-process —
+`session.py` reads the other `notes/session.md` and injects it as a message — and
+that needs a way to name the session, which is the sidebar. Nothing here has to be
+undone to get there.
+
+Also open: nothing prunes old sessions. A long-lived deployment accumulates
+folders and there is no `--forget` yet.
+
+---
