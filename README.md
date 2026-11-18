@@ -231,6 +231,7 @@ Run the suite with the venv interpreter; every file is standalone (`python test_
 | `test_session_replay.py` | continuity and the handover notes: a continued session replays its turns, a restarted one replays nothing, a Clear truncates the replay, and compaction replaces the running lines with a summary |
 | `test_upload.py` | uploads and the three tiers: size, type and traversal refusals, the strict prompt, the tier phrases, and `set_tools` really removing and restoring the web tools |
 | `test_upload_e2e.py` | the join: the dashboard stores the file, the real watcher consumes the control file once, and the agent speaks the question rather than ingesting the file silently |
+| `test_sidebar.py` | the session rail: rows carry a title and a turn count, browsing a session writes no switch request and does not move the pointer, switching writes one, the transaction moves context/jail/log/pointer together and can be undone, and the handover crosses the jail as text |
 
 ## 🖥️ Dashboard
 
@@ -301,6 +302,38 @@ summary is what a different session reads when asked what happened here.
 Each session's tool calls are confined to its own `work/` folder by injecting
 `data_path` per call, which OnIt's servers enforce as the boundary — so one
 session cannot read a sibling's files.
+
+### The session sidebar
+
+The dashboard lists every session on disk, newest first, in a left rail. A row
+shows the time it started and the first thing that was asked, because "18 Nov
+16:20" alone does not tell you which conversation it was.
+
+Two actions per row, and the difference matters:
+
+| action | what happens |
+|---|---|
+| click the row | the page **shows** that session, read-only. The agent stays put. |
+| `switch` | the agent **moves** into that session. New turns land there. |
+| `notes` | that session's handover notes are read into the live one. |
+
+Browsing is not switching on purpose: looking up what you said last week must not
+end today's conversation. While browsing, the page says so in the bar, the
+transcript shows the browsed session, and Send, Clear and Attach are refused —
+they all act on the *live* session, so allowing them from a browsed view would
+put a message in a conversation that is not on screen.
+
+Switching moves everything the agent owns, together: the LLM context (replayed
+from the new session's log), the tool jail, the event log, the four control files
+and the notes file. The session being left is compacted on the way out. The
+sidebar's own two requests live at the sessions root rather than beside the log,
+because a path derived from the live session would move the moment it was acted
+on.
+
+`notes` is the one thing that crosses the jail. It has to be in-process: a
+session's tools are confined to its own `work/`, so no tool can open a sibling's
+`notes/`. The agent reads that file itself and injects it as a system message —
+background the model was given, not a question it has to answer.
 
 ## 📎 Uploading a file, and the search tiers
 

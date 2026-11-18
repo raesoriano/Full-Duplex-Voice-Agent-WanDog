@@ -91,6 +91,30 @@ class EventBus:
     def recent(self, limit: int = 200) -> list[dict]:
         return list(self._recent[-limit:])
 
+    # -- following a session switch -----------------------------------------
+    def repoint(self, log_path: Optional = None) -> None:
+        """Move this bus to another session's log.
+
+        The bus captures its paths at construction (``config.DASHBOARD_LOG`` at
+        import), so a switch that only updated ``config`` would leave every
+        event after it -- the user's words, the reply, the approval files --
+        going to the OLD session's log. Nothing would look broken: the voice
+        loop keeps working and the transcript simply stops growing, in the
+        session the person just moved away from.
+
+        The in-memory ring is cleared rather than kept. It is a cache of "what
+        happened in this conversation", and after a switch it would be a cache
+        of a different conversation -- ``recent()`` would hand the new session's
+        reader the old session's events.
+        """
+        self.log_path = log_path or config.DASHBOARD_LOG
+        self._log = Path(self.log_path)
+        self._pending_path = self._log.with_name(self._log.name + ".pending.json")
+        self._decision_path = self._log.with_name(self._log.name + ".decision.json")
+        with self._lock:
+            self._recent.clear()
+        self._approval_event = None
+
     # -- live approval (file-based) -----------------------------------------
     def set_pending_approval(self, payload: dict) -> None:
         self._approval_event = dict(payload)

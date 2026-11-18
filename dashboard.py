@@ -96,7 +96,9 @@ st.set_page_config(
     page_title="WanDog",
     page_icon=str(ASSETS / "husky-32.png") if (ASSETS / "husky-32.png").exists() else None,
     layout="centered",
-    initial_sidebar_state="collapsed",
+    # Expanded: the session list is the feature, and a rail nobody opens is a
+    # feature nobody has. Streamlit remembers the user collapsing it.
+    initial_sidebar_state="expanded",
 )
 
 
@@ -203,6 +205,58 @@ theme = ss["theme"]
 _ACTIVE = theme if theme in THEMES else DEFAULT_THEME
 
 
+# ---------------------------------------------------------------------------
+# Which session is this page showing?
+# ---------------------------------------------------------------------------
+# Two different questions, and the sidebar is what separates them:
+#
+#   LIVE    -- the session the agent is in. There is exactly one, and it is
+#              whatever .current names. It is what a new turn goes into.
+#   VIEWED  -- the session this page is displaying. Usually the live one, but
+#              clicking an older session in the sidebar makes it something else.
+#
+# They have to be separate because browsing is not switching. Reading an old
+# session must not move the agent into it: the person may be looking for what
+# they said last week while continuing today's conversation. So VIEWED is a
+# read-only view of a folder, and only an explicit "switch" moves the agent.
+#
+# VIEWED is held in session_state, not recomputed from the pointer each rerun,
+# or the first poll would yank the reader back to the live session. It is
+# validated on every rerun -- a session deleted underneath the page falls back
+# to the live one rather than rendering an empty folder forever.
+def _live_id() -> str:
+    return sess.read_pointer() or ""
+
+
+def _viewed_id() -> str:
+    """The session this page is displaying, guaranteed to exist.
+
+    Falls back to the live session when nothing is chosen, when the chosen id
+    is malformed, or when its folder has gone. Falling back rather than raising
+    is the recoverable behaviour: a page that cannot decide what to show has
+    nothing useful to say.
+    """
+    want = ss.get("viewing") or ""
+    if want:
+        try:
+            if sess.session_dir(want).is_dir():
+                return want
+        except ValueError:
+            pass
+        ss.pop("viewing", None)
+    return _live_id()
+
+
+LIVE_ID = _live_id()
+VIEWED_ID = _viewed_id()
+# True when the page is looking at something other than the live session. The
+# transcript uses it to say so, and the composer uses it to refuse to type into
+# a session the agent is not in -- a message sent from a browsed view would
+# arrive in a different conversation than the one on screen.
+BROWSING = bool(VIEWED_ID) and VIEWED_ID != LIVE_ID
+VIEWED_LOG = Path(sess.events_path(VIEWED_ID)) if VIEWED_ID else LOG_PATH
+
+
 # The static rules below use var(--fw-*) everywhere, so they are written as a
 # plain string: nothing here needs Python interpolation, which keeps the braces
 # of the CSS out of an f-string. Only the two variable blocks are generated.
@@ -248,7 +302,79 @@ header[data-testid="stHeader"] { display: none !important; }
        of dead space between the bar and the first message. */
     padding-top: 0;
     padding-bottom: 0;
-    max-width: 820px;
+    /* No HORIZONTAL padding either, and that is what lets the transcript reach
+       the main area's edge. Measured: with Streamlit's 1rem of side padding the
+       scroller's content box was x=316..1084 inside a main area of 300..1100, so
+       its scrollbar sat 16 px inboard -- and no negative margin fixes that,
+       because `width: 100%` is already the padded width; the negative margin
+       only shifts the box, it does not widen it.
+       The reading column keeps its own 1rem of side padding (see the child rule
+       below), so the text is still inset from the edges. */
+    padding-left: 0;
+    padding-right: 0;
+    /* And no max-width, for the same reason. `max-width: 820px` here is what the
+       old `width: 100vw` was working around: the container caps itself at 820
+       and centres, so anything sized as a percentage of it stops short of the
+       main area. Measured at 1280 px with the rail open: main area 300..1280 but
+       the transcript 380..1200 -- an 80 px gap either side, which only looked
+       right at 1100 because there the main area happened to BE 800 px wide.
+       Nothing needs the cap: the bar's and composer's own children carry their
+       own 820 px reading column, and the transcript's child does too. */
+    max-width: none;
+}
+
+/* --- sidebar ---------------------------------------------------------- */
+/* Streamlit's sidebar is a sibling of the main block, and it has its own
+   background and border from Streamlit's theme -- which is NOT this page's
+   theme (see the note at the top: the palette is ours, switched in the browser,
+   and .streamlit/config.toml cannot follow it). Without these rules the rail is
+   a white slab beside a charcoal page, which is the one thing a dark theme
+   makes impossible to ignore.
+
+   The collapse control is left alone: it is the only way back to the page on a
+   narrow window, and hiding it would strand the sidebar open. */
+[data-testid="stSidebar"] {
+    background: var(--fw-panel) !important;
+    border-right: 1px solid var(--fw-border) !important;
+}
+[data-testid="stSidebar"] * { font-family: var(--fw-font) !important; }
+[data-testid="stSidebar"] [data-testid="stSidebarHeader"] { padding: .5rem .6rem; }
+[data-testid="stSidebar"] [data-testid="stSidebarContent"] { padding-top: .2rem; }
+/* The rail's own vertical rhythm. Each session is a button, a caption and
+   sometimes two more buttons, so the default block gap stacks up into a list
+   that is mostly whitespace. */
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: .15rem; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+    margin: 0 0 .1rem .35rem; padding: 0; font-size: .66rem;
+}
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { margin: 0; }
+/* A session row is a label, not a form control: left-aligned text reads as a
+   list of things to pick, while centred text reads as a row of buttons. */
+[data-testid="stSidebar"] .stButton button {
+    justify-content: flex-start;
+    text-align: left;
+    padding: .32rem .55rem;
+    font-size: .8rem;
+    font-weight: 500;
+    border-radius: .5rem;
+    min-height: 0;
+}
+/* The switch/notes pair under a row is secondary to the row itself, so it is
+   quieter: smaller type, no fill until hovered. */
+[data-testid="stSidebar"] [class*="st-key-sess_"] [data-testid="stHorizontalBlock"] .stButton button {
+    justify-content: center;
+    font-size: .68rem;
+    padding: .18rem .4rem;
+    color: var(--fw-muted);
+}
+.fw-side-head {
+    font-size: .72rem; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--fw-faint);
+    margin: .1rem 0 .35rem .35rem;
+}
+.fw-side-empty {
+    font-size: .74rem; color: var(--fw-faint);
+    line-height: 1.5; padding: 0 .35rem;
 }
 
 /* --- top bar ---------------------------------------------------------- */
@@ -257,8 +383,21 @@ header[data-testid="stHeader"] { display: none !important; }
    there is nothing for a sticky element to stick to. The keyed container
    (.st-key-topbar) is ours; the bar's own background is opaque so the
    transcript scrolls UNDER it rather than through it. */
+/* The bar spans the MAIN AREA, not the window. `left: 0` was right when the
+   main block started at the window's edge; with the session rail open it would
+   put the bar underneath the rail, hiding the identity and the Clear button
+   behind it. --fw-rail is published by the layout script from the sidebar's
+   measured width (see _AUTOSCROLL_JS) and falls back to 0, which is exactly the
+   collapsed case -- so one rule covers both states. */
 .st-key-topbar {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+    position: fixed; top: 0; left: var(--fw-rail, 0px); right: 0; z-index: 200;
+    /* `width: auto` is load-bearing with both left and right set. Measured:
+       with a width of 100% (inherited from the block's own rule) the box was
+       1100 px wide starting at x=300, so it ran to x=1400 in a 1100 px window
+       and the bar's right-hand controls were off-screen. With left+right and
+       width:auto the box is sized by the two offsets, which is what "span the
+       main area" means. */
+    width: auto;
     padding: .55rem 1rem .6rem 1rem;
     background: var(--fw-bg);
     border-bottom: 1px solid var(--fw-border);
@@ -351,14 +490,28 @@ header[data-testid="stHeader"] { display: none !important; }
        CONTENT is put back in an 820 px column by the child rule below. One
        scroller, still, and it ends above the composer -- the thumb never
        travels under the composer's gradient. */
-    width: 100vw;
+    /* FULL BLEED TO THE MAIN AREA'S EDGES, not to the viewport's.
+       ---------------------------------------------------------
+       `100vw` and `calc(50% - 50vw)` were written when the main block started at
+       the window's left edge. With the session rail open it does not: the block
+       begins one sidebar-width in, so 100vw overhangs the rail by exactly that
+       much and `50% - 50vw` pulls the box under it -- the transcript would run
+       behind the sidebar, and its scrollbar would sit off-screen to the right.
+
+       100% is the containing block's width, which is the main area, so the box
+       spans it and stops at the rail. The negative margin is then unnecessary:
+       there is nothing to pull out from. The scrollbar still lands on the main
+       area's right edge, which is the window's edge when the rail is closed and
+       the rail's edge when it is open -- in both cases, the edge of the space
+       the conversation actually occupies. */
+    width: 100%;
     /* max-width is required, not decoration: Streamlit's own .stVerticalBlock
-       carries `max-width: 100%`, which clamped 100vw straight back to the 820 px
-       column (measured: width 788 px, the column's content box, with the box
-       starting at x=0 and ending at 788 in a 1200 px window). */
-    max-width: 100vw !important;
-    margin-left: calc(50% - 50vw);
-    margin-right: calc(50% - 50vw);
+       carries `max-width: 100%`, which would otherwise clamp the box back to the
+       820 px column (measured before this: width 788 px, the column's content
+       box, with the box starting at x=0 and ending at 788 in a 1200 px window). */
+    max-width: 100% !important;
+    margin-left: 0;
+    margin-right: 0;
     box-sizing: border-box;
     padding-left: 0;
     padding-right: 0;
@@ -424,7 +577,10 @@ header[data-testid="stHeader"] { display: none !important; }
    that is what makes it read as a chat box rather than a form at the end of a
    page. The keyed container gives us .st-key-composer for free. */
 .st-key-composer {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 100;
+    /* Same reason as the bar, including `width: auto`: it belongs to the main
+       area, not the window, and a set width with both offsets over-constrains. */
+    position: fixed; left: var(--fw-rail, 0px); right: 0; bottom: 0; z-index: 100;
+    width: auto;
     padding: .85rem 1rem 1.05rem 1rem;
     background: linear-gradient(to top, var(--fw-bg) 62%, transparent);
 }
@@ -585,8 +741,14 @@ with st.container(key="themesync"):
 # ---------------------------------------------------------------------------
 
 
-def read_events(limit: int = 400) -> list:
+def read_events(limit: int = 400, log: Path | None = None) -> list:
     """Return the last ``limit`` events, oldest first.
+
+    ``log`` defaults to the LIVE session's log. It is a parameter because the
+    page can be showing a different session than the one the agent is in -- the
+    sidebar makes that an ordinary state, not an edge case -- and reading the
+    live log while displaying another session would show the wrong conversation
+    under the right heading.
 
     Tolerates a line being written at the moment we read it (JSONDecodeError ->
     skip). Consecutive ``user_partial`` events collapse to the newest one: each
@@ -594,10 +756,11 @@ def read_events(limit: int = 400) -> list:
     away. A draft is dropped entirely once a later ``user_text`` arrives -- that
     final transcript is the same turn, spelled correctly.
     """
-    if not LOG_PATH.exists():
+    path = Path(log) if log is not None else LOG_PATH
+    if not path.exists():
         return []
     try:
-        lines = LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return []
     events = []
@@ -845,7 +1008,11 @@ def _data_uri(path: Path) -> str:
 husky_idle_uri = _data_uri(HUSKY_IDLE_PNG)
 husky_think_uri = _data_uri(HUSKY_THINK_PNG)
 
-events = read_events()
+# The bar's subtitle: which model and which ASR, from the VIEWED session's own
+# start event. It reads the viewed log rather than the live one for the same
+# reason the transcript does -- a heading that describes a different session
+# than the text below it is worse than no heading.
+events = read_events(log=VIEWED_LOG)
 session = next((e for e in reversed(events) if e.get("kind") == "session_start"), None)
 subtitle = "voice + text"
 if session:
@@ -857,12 +1024,132 @@ if session:
     if bits:
         subtitle = " \u00b7 ".join(bits)
 
+# ---------------------------------------------------------------------------
+# Sidebar: the sessions, newest first
+# ---------------------------------------------------------------------------
+# Two actions per row, and they mean different things:
+#
+#   the row label -- SHOW this session. Read-only. The agent stays where it is.
+#   "switch"      -- MOVE the agent into this session. New turns land here.
+#
+# Splitting them is what makes browsing safe. One button doing both would mean
+# that looking up something said last week silently ended today's conversation.
+#
+# The action is taken from the button's own return value, INSIDE the fragment.
+# That is not a style choice: a click inside a fragment re-runs the fragment
+# alone, not the page, so a handler in the main script would never see the
+# press. (The opposite trap -- a main-script widget whose press is read in a
+# fragment -- is why the composer's Send is handled where it is drawn.)
+#
+# The list refreshes on a 2 s timer so a session the agent just started appears
+# without a click. Not 1.0 s like the transcript: nothing here changes per
+# second, and re-reading every session's event log is the one real cost.
+
+
+def _short_when(sid: str) -> str:
+    """``2026-11-18T1620-a3f1`` -> ``18 Nov 16:20``.
+
+    The id is already sortable, so the label is a slice and a strptime rather
+    than anything stored separately. A malformed id falls back to the raw
+    prefix instead of raising: a listing that cannot format one row must still
+    list the others.
+    """
+    try:
+        return time.strftime("%d %b %H:%M", time.strptime(sid[:15], "%Y-%m-%dT%H%M"))
+    except (ValueError, TypeError):
+        return sid[:15]
+
+
+@st.fragment(run_every=2.0)
+def session_list() -> None:
+    rows = sess.list_sessions()
+    live = _live_id()
+
+    st.markdown('<div class="fw-side-head">Sessions</div>', unsafe_allow_html=True)
+    if not rows:
+        st.markdown(
+            '<div class="fw-side-empty">No sessions yet. Start the agent and '
+            "one is created.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    for row in rows:
+        sid = row["id"]
+        is_live = sid == live
+        is_viewed = sid == VIEWED_ID
+        label = row["title"] or "(no turns yet)"
+
+        with st.container(key=f"sess_{sid}"):
+            # The live session is marked in the label as well as by colour: a
+            # dot survives a colour-blind reader and a greyscale screenshot,
+            # and the two themes do not both have a "this is the one" hue.
+            shown = st.button(
+                ("\u25cf " if is_live else "") + f"{_short_when(sid)}  {label}",
+                key=f"show_{sid}",
+                help=("The live session -- where new turns land" if is_live
+                      else f"Show this session, read-only \u00b7 {row['turns']} turns"),
+                type="primary" if is_viewed else "secondary",
+                width="stretch",
+            )
+            if shown and not is_viewed:
+                ss["viewing"] = sid
+                st.rerun()
+
+            meta = f"{row['turns']} turns"
+            if row["uploads"]:
+                meta += f" \u00b7 {len(row['uploads'])} file(s)"
+            st.caption(("live \u00b7 " if is_live else "") + meta)
+
+            if not is_live:
+                c_sw, c_ho = st.columns(2)
+                with c_sw:
+                    if st.button("switch", key=f"switch_{sid}",
+                                 help="Make this the live session: the agent "
+                                      "moves here and answers from it",
+                                 width="stretch"):
+                        try:
+                            sess.request_switch(sid)
+                            ss["viewing"] = sid
+                            st.toast(f"Switching the agent to {_short_when(sid)}\u2026")
+                        except ValueError as e:
+                            st.error(str(e))
+                        st.rerun()
+                with c_ho:
+                    if st.button("notes", key=f"hand_{sid}",
+                                 help="Read this session's handover notes into "
+                                      "the live one",
+                                 width="stretch"):
+                        try:
+                            sess.request_handover(sid)
+                            st.toast(f"Reading {_short_when(sid)}'s notes in\u2026")
+                        except ValueError as e:
+                            st.error(str(e))
+                        st.rerun()
+
+
+with st.sidebar:
+    session_list()
+
 
 # One container keyed "topbar", fixed to the top of the viewport by the CSS
 # above. Identity on the left, the two controls on the right, so the bar keeps
 # its shape whether or not a session is running.
 with st.container(key="topbar"):
     h_name, h_theme, h_clear = st.columns([8.4, 0.8, 0.8], vertical_alignment="center")
+
+    if BROWSING:
+        # The page is showing a session the agent is not in. Said plainly and
+        # once, in the bar, because everything below it -- the transcript, the
+        # status line, the composer's refusal -- follows from this one fact.
+        st.caption(
+            f"Browsing {_short_when(VIEWED_ID)} \u00b7 read-only. "
+            f"The agent is in {_short_when(LIVE_ID) if LIVE_ID else 'no session'}."
+        )
+        if st.button("Back to the live session", key="backlive_btn",
+                     icon=":material/arrow_back:"):
+            ss.pop("viewing", None)
+            st.rerun()
 
     with h_name:
 
@@ -934,7 +1221,10 @@ with st.container(key="topbar"):
                 "",
                 key="clearbtn_btn",
                 icon=":material/delete_sweep:",
-                help="Clear chat history (also clears the model's memory of it)",
+                help=("Clearing is disabled while browsing: it would clear the "
+                      "live session, not the one on screen" if BROWSING else
+                      "Clear chat history (also clears the model's memory of it)"),
+                disabled=BROWSING,
             ):
                 request_clear()
                 st.rerun()
@@ -947,11 +1237,11 @@ with st.container(key="topbar"):
     # It lives in the fixed bar rather than under the transcript so it can never
     # push the transcript's bottom edge down (the transcript's height is a
     # viewport calculation) and can never scroll out of sight.
-    tail = read_events(limit=5)
+    tail = read_events(limit=5, log=VIEWED_LOG)
     if tail:
         st.caption(
-            f"{len(read_events())} events \u00b7 {fmt_time(tail[-1].get('ts'))} \u00b7 "
-            f"`{LOG_PATH}`"
+            f"{len(read_events(log=VIEWED_LOG))} events \u00b7 "
+            f"{fmt_time(tail[-1].get('ts'))} \u00b7 `{VIEWED_LOG}`"
         )
 
 
@@ -1102,7 +1392,7 @@ def _esc(text) -> str:
 
 @st.fragment(run_every=1.0)
 def transcript() -> None:
-    events = read_events()
+    events = read_events(log=VIEWED_LOG)
     marker = cleared_at(events)
 
     if marker:
@@ -1116,7 +1406,7 @@ def transcript() -> None:
         events = visible
 
     if not events:
-        if not LOG_PATH.exists():
+        if not VIEWED_LOG.exists():
             st.markdown(
                 '<div class="fw-meta">Waiting for the agent. Start it with '
                 "<code>.venv/bin/python agent.py</code>, then speak or type.</div>",
@@ -1222,11 +1512,40 @@ _AUTOSCROLL_JS = """
   function box() { return D.querySelector('.st-key-transcript'); }
   function bar() { return D.querySelector('.st-key-topbar'); }
   function composer() { return D.querySelector('.st-key-composer'); }
+  function rail() { return D.querySelector('[data-testid="stSidebar"]'); }
+
+  // How much of the window the session rail occupies, in px. Published as
+  // --fw-rail because the bar and the composer are position:fixed against the
+  // WINDOW, and without this they sit underneath the rail.
+  //
+  // Measured rather than assumed: the rail is resizable by dragging, and it is
+  // 0 when collapsed, so any hard-coded width is wrong in at least one of the
+  // states a person will actually use. getBoundingClientRect().right is the
+  // rail's right edge, which is the offset the main area starts at.
+  function railWidth() {
+    var r = rail();
+    if (!r) return 0;
+    var cs = W.getComputedStyle(r);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return 0;
+    var rect = r.getBoundingClientRect();
+    if (rect.width < 1) return 0;
+    return Math.max(0, Math.round(rect.right));
+  }
 
   function fit() {
+    var root = D.documentElement.style;
+    // The rail offset is published FIRST, and before the guard below: the bar
+    // and the composer are positioned by it, and they exist even when there is
+    // no transcript to size (an empty session, the first paint). Publishing it
+    // after the guard left the bar under the rail on exactly those screens.
+    var railPx = railWidth();
+    if (root.getPropertyValue('--fw-rail') !== railPx + 'px') {
+      root.setProperty('--fw-rail', railPx + 'px');
+    }
+
     var t = box(), b = bar(), c = composer();
     if (!t || !b) return;
-    var root = D.documentElement.style;
+
     var barBottom = b.getBoundingClientRect().bottom;
     var lower = c ? c.getBoundingClientRect().top : W.innerHeight;
 
@@ -1275,6 +1594,23 @@ _AUTOSCROLL_JS = """
   });
   W.addEventListener('resize', sync);
   W.addEventListener('load', sync);
+
+  // Collapsing or dragging the rail changes no child list of D.body, so the
+  // observer above does not fire for it -- but the bar's left offset and the
+  // transcript's width both depend on it. A ResizeObserver on the rail is the
+  // event that actually corresponds to the change. Attached lazily because the
+  // rail can appear after this script runs (Streamlit renders it on first
+  // paint, and a page that loads before any session exists has no rows to make
+  // it visible).
+  if (W.ResizeObserver) {
+    var ro = new W.ResizeObserver(function () { sync(); });
+    var attach = function () {
+      var r = rail();
+      if (r && !r.__fwObserved) { r.__fwObserved = true; ro.observe(r); }
+    };
+    attach();
+    new W.MutationObserver(attach).observe(D.body, { childList: true, subtree: true });
+  }
   sync();
 
 })();
@@ -1390,6 +1726,12 @@ def send_control() -> None:
         # re-executes on its own, so a name bound in the main script's scope is
         # not part of its context. The keyed text box keeps its value here.
         text = (ss.get("txt") or "").strip()
+        if text and BROWSING:
+            # A typed message is delivered to the LIVE session. Sending it from
+            # a browsed view would put the words in a conversation the person is
+            # not looking at -- the worst kind of wrong: it looks like it worked.
+            st.toast("This is a read-only view. Switch to the session to type into it.")
+            return
         if text:
             send_typed(text)
             ss["clear_box"] = True
@@ -1426,7 +1768,12 @@ with st.container(key="composer"):
                 accept_multiple_files=False,
                 type=[e.lstrip(".") for e in sorted(sess.UPLOAD_EXTENSIONS)],
             )
-            if picked is not None:
+            if picked is not None and BROWSING:
+                # An upload goes into the LIVE session's work/uploads/, so from
+                # a browsed view it would land in a conversation that is not the
+                # one on screen -- and the spoken question would be asked in it.
+                st.warning("Switch to this session before attaching a file to it.")
+            elif picked is not None:
                 # One write per file, guarded on the id Streamlit gives the
                 # upload: the popover reruns on every keystroke in the
                 # composer, and without this the same file would be stored

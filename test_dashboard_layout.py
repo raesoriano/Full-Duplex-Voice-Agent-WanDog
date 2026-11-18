@@ -42,6 +42,11 @@ ASPECT = {"idle": 0.885, "think": 1.043}
 DASHBOARD = str(Path(__file__).parent / "dashboard.py")
 LOG = Path(os.environ["WANDOG_DASHBOARD_LOG"])
 CHROMIUM_PORT = 9455
+# The browser window the live checks open at. A module constant, not a literal in
+# the Popen call, because the sidebar change needs the SAME geometry checks run at
+# a second width: the bug it was hiding (a container capped at 820 px) is
+# invisible at 1100, where the main area happens to be exactly 800 px wide.
+WINDOW = (1100, 800)
 
 
 def _seed(*events: dict) -> None:
@@ -285,7 +290,8 @@ async def _drive(url: str, checks: dict, setup: str | None = None,
 
     proc = subprocess.Popen(
         ["chromium", "--headless=new", "--disable-gpu", "--no-sandbox",
-         f"--remote-debugging-port={CHROMIUM_PORT}", "--window-size=1100,800",
+         f"--remote-debugging-port={CHROMIUM_PORT}",
+         f"--window-size={WINDOW[0]},{WINDOW[1]}",
          "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
@@ -383,8 +389,18 @@ GEOMETRY = {
       const e = document.querySelector('.st-key-transcript');
       if (!e) return null;
       const r = e.getBoundingClientRect();
+      // The rail's right edge is where the main area starts, so it is what the
+      // scroller has to line up with. 0 when the rail is collapsed.
+      const rail = document.querySelector('[data-testid="stSidebar"]');
+      let railRight = 0;
+      if (rail) {
+        const rr = rail.getBoundingClientRect();
+        if (getComputedStyle(rail).display !== 'none' && rr.width > 1) {
+          railRight = Math.round(rr.right);
+        }
+      }
       return {left: Math.round(r.left), right: Math.round(r.right),
-              win: window.innerWidth,
+              win: window.innerWidth, railRight: railRight,
               gutter: e.offsetWidth - e.clientWidth,
               overflow: getComputedStyle(e).overflowY};
     })()""",
@@ -466,12 +482,22 @@ def test_live_layout() -> None:
             f"the scroller ends at x={sb['right']} in a {sb['win']} px window, so its "
             f"scrollbar is {sb['win'] - sb['right']} px inboard of the window edge"
         )
-        assert sb["left"] <= 1, f"the scroller starts at x={sb['left']}, not the edge"
+        # The scroller spans the MAIN AREA: from the rail's right edge (0 when
+        # the rail is collapsed) to the window's right edge. Before the session
+        # sidebar existed the left edge was always 0, so this asserted
+        # `left <= 1`; with a rail open that is no longer the contract, and
+        # keeping it would have passed only by the rail being shut.
+        assert abs(sb["left"] - sb["railRight"]) <= 1, (
+            f"the scroller starts at x={sb['left']} but the main area starts at "
+            f"x={sb['railRight']} (the rail's right edge): "
+            + ("it runs under the sidebar" if sb["left"] < sb["railRight"]
+               else "it leaves a gap beside the sidebar")
+        )
         assert sb["gutter"] > 0, (
             "the scroller reserves no scrollbar gutter, so this proves nothing"
         )
-        print(f"7. live: scrollbar on the window edge (x={sb['right'] - sb['gutter']}"
-              f"-{sb['right']} of {sb['win']})  OK")
+        print(f"7. live: scrollbar on the main area's edge (x={sb['right'] - sb['gutter']}"
+              f"-{sb['right']} of {sb['win']}, rail {sb['railRight']})  OK")
 
         # The bar's face must follow the turn. Both images are in the DOM and CSS
         # chooses; checking opacity is what proves the swap actually happened,
@@ -551,6 +577,57 @@ def test_live_layout() -> None:
         print("9. live: new turn does not yank a reader back down    OK")
 
 
+def test_live_layout_at_a_wide_window() -> None:
+    """The same alignment, at a width where the main area is NOT 800 px.
+
+    Why this exists
+    ---------------
+    The first version of the sidebar change replaced `width: 100vw` with
+    `width: 100%` and kept `.block-container { max-width: 820px }`. At the
+    1100 px window every live check runs in, the main area is exactly 800 px, so
+    100% of it is 800 and everything lined up -- the cap was invisible. At 1280
+    the transcript was 380..1200 inside a main area of 300..1280: 80 px of dead
+    space either side, which is the exact complaint the full-bleed rule exists to
+    answer.
+
+    So the geometry is checked at a second width. A rule that only holds where
+    the numbers happen to coincide is not a rule.
+    """
+    global WINDOW
+    _seed_conversation(8)
+    saved = WINDOW
+    WINDOW = (1280, 860)
+    try:
+        with _Server() as srv:
+            got = asyncio.run(_drive(srv.url, GEOMETRY))
+    finally:
+        WINDOW = saved
+
+    sb = got["scrollbar"]
+    assert sb, "no .st-key-transcript in the page"
+    assert sb["win"] >= 1200, f"the window did not widen: {sb['win']}"
+
+    # The scroller spans the main area exactly: rail edge -> window edge.
+    assert abs(sb["left"] - sb["railRight"]) <= 1, (
+        f"at {sb['win']} px the scroller starts at x={sb['left']} but the main "
+        f"area starts at x={sb['railRight']}"
+    )
+    assert abs(sb["right"] - sb["win"]) <= 1, (
+        f"at {sb['win']} px the scroller ends at x={sb['right']}, "
+        f"{sb['win'] - sb['right']} px short of the edge"
+    )
+
+    # And the bar and composer follow the same offsets, or a control sits under
+    # the rail (bar) or over it (composer).
+    bar, comp = got["bar"], got["composer"]
+    assert abs(bar["y"]) <= 1, f"the bar is at y={bar['y']}, not the top"
+    assert comp["y"] > bar["h"], (
+        f"the composer at y={comp['y']} overlaps the {bar['h']} px bar"
+    )
+    print(f"10. live at {sb['win']} px: scroller spans the main area "
+          f"({sb['left']}..{sb['right']}, rail {sb['railRight']})  OK")
+
+
 def main() -> int:
     tests = [
         test_bar_holds_identity_and_both_controls,
@@ -566,11 +643,12 @@ def main() -> int:
             print(f"FAIL {t.__name__}: {e}")
             failed += 1
 
-    try:
-        test_live_layout()
-    except AssertionError as e:
-        print(f"FAIL test_live_layout: {e}")
-        failed += 1
+    for t in (test_live_layout, test_live_layout_at_a_wide_window):
+        try:
+            t()
+        except AssertionError as e:
+            print(f"FAIL {t.__name__}: {e}")
+            failed += 1
 
     print("OK" if not failed else f"{failed} FAILED")
     return 1 if failed else 0

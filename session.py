@@ -304,15 +304,113 @@ def list_sessions() -> list[dict]:
             meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             meta = {}
+        turns = read_turns(d.name, limit=0)
+        first = next((t["text"] for t in turns if t["role"] == "user"), "")
         out.append({
             "id": d.name,
             "dir": d,
             "started": meta.get("started") or "",
             "mode": meta.get("mode") or "session",
             "uploads": meta.get("uploads") or [],
+            # What a sidebar row shows without opening the folder. The log is
+            # the record; meta.json only knows when the session started.
+            "title": _one_line(first, 60) if first else "",
+            "turns": len(turns),
         })
     out.sort(key=lambda s: s["id"], reverse=True)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Switching (the sidebar's write side)
+# ---------------------------------------------------------------------------
+# The switch request lives at the ROOT, not beside the event log, and that is
+# the whole point: every other control file is derived from the live session's
+# log, so "switch to session B" written next to session A's log would have to be
+# found at a path that changes the moment the switch happens. One stable path
+# that both processes can compute without knowing which session is live.
+SWITCH_NAME = ".switch"
+HANDOVER_NAME = ".handover"
+
+
+def switch_path() -> Path:
+    return root() / SWITCH_NAME
+
+
+def handover_path() -> Path:
+    return root() / HANDOVER_NAME
+
+
+def _drop_at(path: Path, payload: dict) -> None:
+    """Write a control file. Best effort: a dashboard whose root is read-only
+    must not raise into the page."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def request_switch(sid: str) -> None:
+    """Ask the agent to make ``sid`` the live session.
+
+    Refuses anything that is not an existing session: a switch to a folder that
+    is not there would leave the pointer naming nothing, and the agent would
+    then answer with no jail and no log.
+    """
+    d = session_dir(sid)          # raises ValueError on a malformed id
+    if not d.is_dir():
+        raise ValueError(f"no such session: {sid}")
+    _drop_at(switch_path(), {"id": secrets.token_hex(8), "session": sid,
+                             "ts": time.time()})
+
+
+def request_handover(sid: str) -> None:
+    """Ask the agent to read another session's notes into this one.
+
+    A separate control file from the switch because it is a different act: the
+    session stays where it is, and only the handover text crosses over. It has
+    to be the agent that reads it -- the notes sit outside the tool jail, so no
+    tool in this session can reach a sibling's folder, by design.
+    """
+    d = session_dir(sid)
+    if not d.is_dir():
+        raise ValueError(f"no such session: {sid}")
+    _drop_at(handover_path(), {"id": secrets.token_hex(8), "session": sid,
+                               "ts": time.time()})
+
+
+def take_at(path: Path) -> dict | None:
+    """Read a root-level control file and delete it.
+
+    Same one-shot rule as the agent's other controls: delete before acting, so
+    a request that raises is lost rather than performed twice.
+    """
+    try:
+        if not path.exists():
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 -- a half-written file is retried next tick
+        return None
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    return payload if isinstance(payload, dict) else None
+
+
+def handover_text(sid: str) -> str:
+    """Another session's notes, as text to read into this one.
+
+    Returns "" when there is nothing to hand over. The compacted summary is
+    preferred; before the first compaction the file is a running list of turns,
+    which is still the honest answer to "what happened in that session".
+    """
+    try:
+        text = notes_path(sid).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return text
 
 
 # ---------------------------------------------------------------------------

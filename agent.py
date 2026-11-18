@@ -178,6 +178,9 @@ class DashboardControlWatcher(FrameProcessor):
     def __init__(self, typed_path: str, stop_path: str, bus=None,
                  poll_secs: float = 0.2, clear_path: str | None = None,
                  upload_path: str | None = None, session_id: str = "",
+                 switch_path: str | None = None,
+                 handover_path: str | None = None,
+                 on_switch=None, on_handover=None,
                  **kwargs):
         super().__init__(**kwargs)
         self._typed_path = Path(typed_path)
@@ -188,12 +191,26 @@ class DashboardControlWatcher(FrameProcessor):
         self._bus = bus
         self._poll = poll_secs
         self._task: asyncio.Task | None = None
+        # The sidebar's two requests. Unlike the controls above these live at
+        # the sessions ROOT, not beside the log: their whole job is to name a
+        # DIFFERENT session, so a path derived from the live one would move
+        # under them the moment they were acted on.
+        self._switch_path = Path(switch_path) if switch_path else None
+        self._handover_path = Path(handover_path) if handover_path else None
+        # The callbacks do the moving. This stage deliberately does NOT know how
+        # to change session: adopting one touches the LLM context, the tool
+        # jail, the notes file and this watcher's own paths, and half of that
+        # living here would put the transaction in two places.
+        self._on_switch = on_switch
+        self._on_handover = on_handover
         # Last id acted on, so a file that could not be deleted (permissions,
         # a racing writer) still cannot be answered twice.
         self._last_typed_id = None
         self._last_stop_id = None
         self._last_clear_id = None
         self._last_upload_id = None
+        self._last_switch_id = None
+        self._last_handover_id = None
 
     # -- file plumbing -----------------------------------------------------
 
@@ -218,6 +235,34 @@ class DashboardControlWatcher(FrameProcessor):
         except OSError:
             pass
         return payload if isinstance(payload, dict) else None
+
+    def repoint(self, typed_path=None, stop_path=None, clear_path=None,
+                upload_path=None, session_id=None) -> None:
+        """Follow a session switch.
+
+        Only the paths move; the callbacks and the bus are untouched, because
+        the switch itself already re-pointed the bus and this stage is not the
+        thing that decides a session has changed. Each argument is optional so a
+        caller can move one path without having to restate the others.
+        """
+        if typed_path is not None:
+            self._typed_path = Path(typed_path)
+        if stop_path is not None:
+            self._stop_path = Path(stop_path)
+        if clear_path is not None:
+            self._clear_path = Path(clear_path)
+        if upload_path is not None:
+            self._upload_path = Path(upload_path)
+        if session_id is not None:
+            self._session_id = session_id
+        # The ids are per-file. Keeping them across a switch would make the new
+        # session ignore a control file that happened to reuse an id -- and the
+        # dashboard mints a fresh uuid for every write, so there is nothing to
+        # gain by carrying them over.
+        self._last_typed_id = None
+        self._last_stop_id = None
+        self._last_clear_id = None
+        self._last_upload_id = None
 
     # -- actions -----------------------------------------------------------
 
@@ -333,6 +378,75 @@ class DashboardControlWatcher(FrameProcessor):
             )
         )
 
+    async def _handle_switch(self, payload: dict) -> None:
+        """Move this agent to the session the sidebar picked.
+
+        Everything a session owns has to move together, or the agent ends up in
+        a state no single session describes: the context still holding the old
+        conversation, the jail still pointing at the old folder, the notes still
+        being appended to the old file. ``on_switch`` is that transaction; this
+        method only decides that it should run and reports the outcome.
+        """
+        sw_id = payload.get("id")
+        if sw_id is not None and sw_id == self._last_switch_id:
+            return
+        self._last_switch_id = sw_id
+
+        sid = (payload.get("session") or "").strip()
+        if not sid or self._on_switch is None:
+            return
+        # Compare against the session this watcher believes is live, which is
+        # updated at the END of a successful switch. That is deliberate: the
+        # callback is what moves config and the context, so if it raises, this
+        # field must still name the session the agent is actually in. The
+        # duplicate-id guard above is what stops a re-delivered file being
+        # acted on twice; this guard is only for a click on the live row.
+        if sid == self._session_id:
+            # Clicking the session already live is not a switch. Treated as a
+            # no-op rather than an error: the sidebar lists it, so it can be
+            # clicked, and a spoken complaint about it would be baffling.
+            return
+
+        logger.info(" switch to session {} requested", sid)
+        try:
+            await self._on_switch(sid)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not switch to {}: {}", sid, e)
+            if self._bus is not None:
+                await self._bus.emit("switch_failed", session=sid, error=str(e))
+            return
+        self._session_id = sid
+        # A switch is a new conversation, so whatever was in flight is stale.
+        # Stopping first is what stops a half-generated reply from the OLD
+        # session landing in the new one's context -- the assistant aggregator
+        # writes back into the shared context, which is now the new session's.
+        await self.broadcast_interruption()
+
+    async def _handle_handover(self, payload: dict) -> None:
+        """Read another session's notes into this one.
+
+        The notes live outside the tool jail, so this cannot be done by a tool:
+        a session's file tools are confined to its own ``work/`` and a sibling's
+        ``notes/`` is deliberately unreachable. Reading it here is the one path
+        that crosses over, and it crosses as text the model is told about --
+        not as access.
+        """
+        h_id = payload.get("id")
+        if h_id is not None and h_id == self._last_handover_id:
+            return
+        self._last_handover_id = h_id
+
+        sid = (payload.get("session") or "").strip()
+        if not sid or self._on_handover is None:
+            return
+        logger.info(" handover from session {} requested", sid)
+        try:
+            await self._on_handover(sid)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Handover from {} failed: {}", sid, e)
+            if self._bus is not None:
+                await self._bus.emit("handover_failed", session=sid, error=str(e))
+
     async def _watch(self):
         while True:
             typed = self._take(self._typed_path)
@@ -349,6 +463,14 @@ class DashboardControlWatcher(FrameProcessor):
                 upload = self._take(self._upload_path)
                 if upload is not None:
                     await self._handle_upload(upload)
+            if self._switch_path is not None:
+                switch = self._take(self._switch_path)
+                if switch is not None:
+                    await self._handle_switch(switch)
+            if self._handover_path is not None:
+                handover = self._take(self._handover_path)
+                if handover is not None:
+                    await self._handle_handover(handover)
             await asyncio.sleep(self._poll)
 
     # -- pipeline ----------------------------------------------------------
@@ -1042,6 +1164,90 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     # Hook the transcript events before the pipeline runs so no turn is missed.
     wire_transcript_events(user_agg, assistant_agg, bus,
                            on_user_text=_maybe_change_mode)
+    # --- Switching sessions ------------------------------------------------
+    # The transaction. Everything a session owns moves here and nowhere else:
+    # the harness constants, the event bus, the tool jail, the LLM context, and
+    # the control paths this stage polls.
+    #
+    # Order matters. The context is emptied FIRST, before anything is re-pointed,
+    # because the assistant aggregator writes the bot's reply back into the
+    # shared context as it finishes: a reply still in flight from the old
+    # session would otherwise land in the new session's history. The
+    # interruption that stops it is broadcast by the watcher after this returns,
+    # so the window is one poll tick -- short, but not zero, which is why the
+    # context is cleared here rather than trusted to be quiet.
+    async def _switch_to(sid: str) -> None:
+        from pipecat.frames.frames import LLMMessagesUpdateFrame
+
+        # Stop this session's notes being appended to after the move. Compacted
+        # first so the handover file is a summary rather than a running list --
+        # the point of leaving a session is that someone can pick it up.
+        if config.SESSION_ID:
+            try:
+                session.compact(config.SESSION_ID, model=config.LLM_MODEL)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Could not compact {}: {}", config.SESSION_ID, e)
+
+        context.set_messages([])
+        await watcher.queue_frame(LLMMessagesUpdateFrame(messages=[], run_llm=False))
+
+        config.adopt(sid)
+        session.write_pointer(sid)
+        if bus is not None:
+            bus.repoint(config.DASHBOARD_LOG)
+        if bridge is not None:
+            bridge.session_data_path = config.SESSION_WORK_DIR
+        watcher.repoint(
+            typed_path=config.DASHBOARD_TYPED_FILE,
+            stop_path=config.DASHBOARD_STOP_FILE,
+            clear_path=config.DASHBOARD_CLEAR_FILE,
+            upload_path=config.DASHBOARD_UPLOAD_FILE,
+            session_id=sid,
+        )
+
+        # The new session's own history, replayed exactly as a continued
+        # session is at startup. A session that was switched away from and back
+        # to must come back as it was, not empty.
+        context.set_messages(session.replay_messages(sid))
+        if config.SESSION_ID:
+            try:
+                apply_search_mode(llm, context, bridge,
+                                  session.get_mode(sid),
+                                  session.uploaded_files(sid))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Could not apply {}'s mode: {}", sid, e)
+        if bus is not None:
+            await bus.emit("session_switched", session=sid)
+        logger.info("  Session -> {} ({})", sid, config.SESSION_DIR)
+
+    async def _hand_over(sid: str) -> None:
+        """Read a sibling session's notes into this one's context.
+
+        Injected as a system-role message rather than a user turn: it is
+        background the model was given, not something the person said. A user
+        turn would make it look like a question that still needs answering, and
+        the model would answer it.
+        """
+        text = session.handover_text(sid)
+        if not text:
+            if bus is not None:
+                await bus.emit("handover_empty", session=sid)
+            return
+        from pipecat.frames.frames import LLMMessagesAppendFrame
+        note = (
+            f"Notes from an earlier session ({sid}). This is background for "
+            f"you, not something the user just said. Use it when it helps; say "
+            f"so if it does not cover what they ask.\n\n{text}"
+        )
+        await watcher.queue_frame(
+            LLMMessagesAppendFrame(
+                messages=[{"role": "system", "content": note}], run_llm=False
+            )
+        )
+        if bus is not None:
+            await bus.emit("handover", session=sid, chars=len(text))
+        logger.info("  Handover from {}: {} chars", sid, len(text))
+
 
     # --- Pipeline ------------------------------------------------------------
     # mic -> resample -> ASR -> user agg (VAD + barge-in) -> LLM -> [assistant
@@ -1082,7 +1288,7 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     # A stop is an InterruptionFrame, which broadcast_interruption() sends in
     # both directions, so it reaches the STT and the transports upstream and
     # the LLM and TTS downstream from here either way.
-    stages.append(DashboardControlWatcher(
+    watcher = DashboardControlWatcher(
         config.DASHBOARD_TYPED_FILE,
         config.DASHBOARD_STOP_FILE,
         bus=bus,
@@ -1090,7 +1296,12 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         clear_path=config.DASHBOARD_CLEAR_FILE,
         upload_path=config.DASHBOARD_UPLOAD_FILE,
         session_id=config.SESSION_ID,
-    ))
+        switch_path=str(session.switch_path()),
+        handover_path=str(session.handover_path()),
+        on_switch=_switch_to,
+        on_handover=_hand_over,
+    )
+    stages.append(watcher)
     stages.append(user_agg)
     stages.append(llm)
     # TTS comes straight after the LLM. The assistant aggregator must come AFTER

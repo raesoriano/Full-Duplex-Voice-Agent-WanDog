@@ -560,6 +560,55 @@ DASHBOARD_MIC_FILE = os.environ.get(
     "WANDOG_DASHBOARD_MIC",
     str(Path(DASHBOARD_LOG).with_suffix(".mic_control.json")))
 
+
+# ---------------------------------------------------------------------------
+# Following the pointer when the sidebar switches sessions
+# ---------------------------------------------------------------------------
+# Everything above is bound once, at import, which is what makes the agent and
+# the dashboard agree about which session is live without either telling the
+# other. A switch breaks that assumption: the session changes while both
+# processes are running, and a constant that was correct at import is wrong a
+# second later.
+#
+# The agent is the side that has to follow, because the agent is what holds the
+# conversation: its context, its jail, its log and its notes all belong to one
+# session. ``adopt()`` moves all of them together, and it is the ONLY place that
+# does -- so "which session am I" has one answer at any moment.
+#
+# The dashboard does not use this. It reads the session it is showing from
+# session_state instead, because a Streamlit script re-runs top to bottom on
+# every interaction and a module-level rebind would be undone on the next rerun.
+def adopt(sid: str) -> None:
+    """Make ``sid`` this process's session: log, controls, jail, and id.
+
+    Refuses a malformed id or a folder that is not there. The caller is
+    responsible for the things this module cannot reach -- the LLM context, the
+    tool bridge's jail, the notes file -- because those live in agent.py.
+
+    The environment is written too, not just the constants: the event bus, the
+    OnIt servers and the control watchers are all handed paths at construction,
+    and anything that re-reads ``WANDOG_DASHBOARD_LOG`` must see the new one.
+    """
+    global SESSION_DIR, SESSION_ID, SESSION_WORK_DIR, DASHBOARD_LOG
+    global DASHBOARD_TYPED_FILE, DASHBOARD_STOP_FILE, DASHBOARD_CLEAR_FILE
+    global DASHBOARD_UPLOAD_FILE, DASHBOARD_MIC_FILE
+
+    d = session.session_dir(sid)
+    if not d.is_dir():
+        raise ValueError(f"no such session: {sid}")
+
+    log = str(session.events_path(sid))
+    SESSION_DIR = d
+    SESSION_ID = sid
+    SESSION_WORK_DIR = str(session.work_dir(sid))
+    DASHBOARD_LOG = log
+    os.environ["WANDOG_DASHBOARD_LOG"] = log
+    DASHBOARD_TYPED_FILE = str(Path(log).with_name(Path(log).name + ".typed.json"))
+    DASHBOARD_STOP_FILE = str(Path(log).with_name(Path(log).name + ".stop.json"))
+    DASHBOARD_CLEAR_FILE = str(Path(log).with_name(Path(log).name + ".clear.json"))
+    DASHBOARD_UPLOAD_FILE = str(Path(log).with_name(Path(log).name + ".upload.json"))
+    DASHBOARD_MIC_FILE = str(Path(log).with_suffix(".mic_control.json"))
+
 # ---------------------------------------------------------------------------
 # Persona / system prompt
 # ---------------------------------------------------------------------------

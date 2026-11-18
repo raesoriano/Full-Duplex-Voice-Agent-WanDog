@@ -1636,6 +1636,10 @@ no commit here is still open -- see §14.
 | apply_search_mode: ToolsSchema, not a list     | 97956495 | 23    |
 | DOCUMENTS_PATH set; servers read ONIT_*        | 97956495 | 23    |
 | Sessions rooted in /tmp (lost on reboot)       | 97956495 | 23    |
+| Transcript 80 px short of the main area        | PENDING  | 23    |
+| The bar ran 300 px past the window edge        | PENDING  | 23    |
+| Scrollbar inboard: container padding, not gap  | PENDING  | 23    |
+| Switch compared against a stale session id     | PENDING  | 23    |
 
 ## 23. Sessions: one folder per conversation, and an upload that asks first
 
@@ -1846,19 +1850,70 @@ skipped). Neither is caused by this work.
 `test_tool_guidance`, `test_results_cap`, `test_tool_parity`, `test_bargein` and
 `test_muted_turn` all still pass.
 
+### The sidebar, and what it changed
+
+Built on the `sidebar` branch, from `file-upload`. The rail lists every session
+newest first; a row carries the time it started and the first thing that was
+asked, because an id does not tell you which conversation it was.
+
+The design decision worth keeping: **browsing is not switching.** Clicking a row
+shows that session read-only and leaves the agent where it is. One button doing
+both would mean that looking something up silently ended today's conversation.
+The consequence is that the page has TWO session ids — LIVE (what `.current`
+names, where new turns go) and VIEWED (what is on screen) — and everything that
+acts on the live session has to say so: Send, Clear and Attach are refused while
+browsing, because otherwise the message lands in a conversation that is not
+visible.
+
+Switching is a transaction, and it lives in one place (`_switch_to` in
+`build_pipeline`) because it has to move five things together: the LLM context,
+the tool jail, the event log, the four control files, and the notes. The context
+is cleared FIRST, before anything is re-pointed — the assistant aggregator writes
+the reply back into the shared context as it finishes, so a reply still in flight
+from the old session would otherwise land in the new one's history.
+
+The two sidebar requests (`.switch`, `.handover`) live at the sessions ROOT, not
+beside the event log. Every other control file is derived from the live log, and
+that is exactly wrong here: a request naming a different session would move the
+moment it was acted on.
+
+`notes` is the one thing that crosses the jail. It has to be in-process — a
+session's tools are confined to its own `work/`, so no tool can open a sibling's
+`notes/`. The agent reads the file itself and injects it as a **system** message,
+not a user turn: it is background the model was given, and a user turn would look
+like a question that still needs answering.
+
+### The three bugs the live checks caught
+
+1. **`width: 100vw` had to become `100%` — but the container was capped.** With
+   the rail open the main area no longer starts at the window's edge, so `100vw`
+   overhung it. The obvious fix (100% of the containing block) then inherited
+   `.block-container { max-width: 820px }`, and at 1280 px the transcript was
+   380..1200 inside a main area of 300..1280 — 80 px of dead space either side.
+   The 1100 px window the live checks use made this INVISIBLE: there the main
+   area is exactly 800 px, so 100% of it is 800 and everything lined up. Fixed by
+   dropping the cap, and the geometry is now checked at a second width
+   (`test_live_layout_at_a_wide_window`) precisely because a rule that only holds
+   where the numbers coincide is not a rule.
+
+2. **`left` and `right` together with an inherited `width: 100%` over-constrains.**
+   The bar computed to 1100 px wide starting at x=300, so it ran to x=1400 in a
+   1100 px window and its right-hand controls were off-screen. `width: auto` is
+   what makes two offsets size the box.
+
+3. **The scrollbar sat inboard because of container padding, not the gutter.** The
+   first fix pulled a negative margin equal to the scrollbar's width; that only
+   SHIFTS a box, it does not widen it, and the real bound was Streamlit's 1rem of
+   `.block-container` side padding. Removing the padding (the reading column keeps
+   its own) is what put the thumb on the main area's edge.
+
 ### Still not built
 
-The sidebar, session switching, and reading another session's notes on request —
-parked by request. Every session's folder is already on disk, so the sidebar is a
-reader over folders that exist.
+Nothing prunes old sessions. A long-lived deployment accumulates folders and there
+is no `--forget` yet, and no way to delete one from the rail.
 
-Reading a *sibling's* notes is the one piece with a real constraint: the jail
-forbids it by design, so it cannot go through a tool. It has to be in-process —
-`session.py` reads the other `notes/session.md` and injects it as a message — and
-that needs a way to name the session, which is the sidebar. Nothing here has to be
-undone to get there.
-
-Also open: nothing prunes old sessions. A long-lived deployment accumulates
-folders and there is no `--forget` yet.
+The handover is manual: you press `notes` on a row. It is not automatic when you
+switch, because importing a summary the user did not ask for is a silent change to
+what the model knows.
 
 ---
