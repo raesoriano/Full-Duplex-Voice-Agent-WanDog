@@ -1001,6 +1001,34 @@ def render_event(ev: dict) -> None:
             + f"  \n`{ts}`"
         )
 
+    elif kind == "audio_out_recovering":
+        # The speaker stopped accepting audio -- on this Pi that means the USB
+        # device re-enumerated and the stream bound to it wedged. Without this
+        # line the first sign is "the TTS stopped working": Piper reports
+        # success, no transcript is missing, and nothing comes out.
+        st.warning(
+            "Speaker dropped out \u2014 reopening the audio device. "
+            f"Speech may pause for a moment.  \n`{ts}`"
+        )
+
+    elif kind == "audio_out_recovered":
+        # Worth showing, not worth alarming: the agent fixed itself, and the
+        # user needs to know the gap in the speech was not them.
+        secs = ev.get("seconds")
+        dev = str(ev.get("device") or "the speaker")
+        took = f" in {secs}s" if secs is not None else ""
+        st.info(f"Speaker is back{took} ({dev}). Speech resumes normally.  \n`{ts}`")
+
+    elif kind == "audio_out_recovery_failed":
+        # The device did not come back. Say so plainly: everything else in the
+        # agent still works, so silence with no explanation is confusing.
+        st.error(
+            "The speaker could not be reopened after "
+            f"{ev.get('attempts', 'several')} attempts. The agent can still "
+            "hear and answer, but you will not hear it until the audio device "
+            f"is back.  \n`{ts}`"
+        )
+
     elif kind == "approval_requested":
         st.warning(
             f"Approval needed for {ev.get('tool', 'a tool')}: "

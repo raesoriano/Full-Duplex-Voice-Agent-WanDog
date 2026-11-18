@@ -70,9 +70,11 @@ from pipecat.services.whisper.stt import WhisperSTTService
 from streaming_asr import SherpaStreamingSTTService
 from pipecat.transports.local.audio import (
     LocalAudioInputTransport,
-    LocalAudioOutputTransport,
     LocalAudioTransportParams,
 )
+# Not LocalAudioOutputTransport: that one dies for good when the USB speaker
+# re-enumerates. See audio_out.py for the evidence.
+from audio_out import RecoveringAudioOutputTransport
 from pipecat.workers.runner import WorkerRunner
 
 logging.basicConfig(level=logging.INFO)
@@ -682,6 +684,33 @@ def pipeline_stage_names() -> list[str]:
     return [type(p).__name__ for p in pipeline._processors]
 
 
+
+def _audio_out_event(bus):
+    """Adapt the transport's ``on_event(kind, fields)`` to the event bus.
+
+    The transport calls this from the audio task, which is an event-loop
+    thread, so emitting is scheduled on the loop rather than awaited here.
+    Without this the dashboard shows nothing when the speaker drops out and
+    comes back -- which is how a recoverable glitch looks like a dead agent.
+    """
+    if bus is None:
+        return None
+
+    def emit(kind: str, fields: dict) -> None:
+        async def _emit():
+            try:
+                await bus.emit(kind, **fields)
+            except Exception:  # noqa: BLE001 - reporting must never break audio
+                logger.debug("audio_out: bus emit failed", exc_info=True)
+
+        try:
+            asyncio.get_running_loop().create_task(_emit())
+        except RuntimeError:
+            logger.debug("audio_out: no running loop for %s", kind)
+
+    return emit
+
+
 def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None" = None,
                    bus=None, transports=None):
     """Construct the Pipecat pipeline.
@@ -724,7 +753,17 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
             output_device_index=config.OUTPUT_DEVICE_INDEX,
         )
         input_transport = LocalAudioInputTransport(pa, transport_params)
-        output_transport = LocalAudioOutputTransport(pa, transport_params)
+        # The speaker is a USB device that re-enumerates on its own (dmesg:
+        # "usb 3-2: USB disconnect ... new full-speed USB device"), and the
+        # stock transport turns one stalled write into a permanent "unusable"
+        # verdict -- after which Pipecat drops every audio frame and the agent
+        # is silently mute until the process restarts. This one reopens the
+        # device instead. `on_event` reports it to the dashboard.
+        output_transport = RecoveringAudioOutputTransport(
+            pa,
+            transport_params,
+            on_event=_audio_out_event(bus),
+        )
 
     # --- VAD (Silero ONNX, torch-free) -------------------------------------
     # In Pipecat 1.15 barge-in is NOT driven by a standalone VADProcessor.
