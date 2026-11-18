@@ -27,6 +27,14 @@ import config  # noqa: E402
 
 DECK = ROOT / "ME 3 Deck v2"
 
+# The clock term changes on every call, so the documents print this in its
+# place. Written to match what config.clock_line() emits, so the join shape is
+# still visible and still verifiable.
+CLOCK_PLACEHOLDER = (
+    "The current date and time here is <weekday, DD Month YYYY, HH:MM AM/PM> "
+    "(<zone>, <abbr>, UTC<offset>). "
+)
+
 # A quarter of a 1920x1080 slide is 960x540. At 9 pt in a text box that is
 # ~2,200 characters before it overflows. 2,200 is the budget.
 QUARTER_PAGE_CHARS = 2200
@@ -47,11 +55,20 @@ def main() -> None:
     tools_excerpt = first_sentences(config.TOOLS_SYSTEM_PROMPT, 1)
     clock = config.clock_line().strip()
 
-    # agent.py:709-712 -- one space between every term, then .strip()
-    assembled = (config.SYSTEM_PROMPT + " " + config.OWNER_PROMPT
-                 + " " + config.clock_line()
-                 + " " + config.CLOCK_GUARD).strip()
-    assembled = (assembled + " " + config.TOOLS_SYSTEM_PROMPT).strip()
+    # agent.py:709-712 -- one space between every term, then .strip().
+    #
+    # The clock term is swapped for CLOCK_PLACEHOLDER in both places it appears.
+    # A real timestamp here made `verify_figures.py --check` fail against a
+    # clean checkout at every minute but the one this file was generated in:
+    # the check compares the document against the *live* clock_line(). The
+    # placeholder keeps the join shape checkable without pinning a time.
+    def join_prompt(clock_term: str) -> str:
+        out = (config.SYSTEM_PROMPT + " " + config.OWNER_PROMPT
+               + " " + clock_term + " " + config.CLOCK_GUARD).strip()
+        return (out + " " + config.TOOLS_SYSTEM_PROMPT).strip()
+
+    assembled = join_prompt(config.clock_line())
+    assembled_placeholder = join_prompt(CLOCK_PLACEHOLDER)
 
     slide = f"""# System prompt (v3)
 
@@ -113,11 +130,12 @@ name?"*. The GitHub handle is here because `github_repo` acts on that account.
 
 ## 3 \u00b7 `clock_line()` \u2014 generated per call ({len(clock)} chars)
 
-Sample from this machine. Generated, not baked in, so a long-running process
-cannot drift to yesterday.
+Generated, not baked in, so a long-running process cannot drift to yesterday.
+The shape is fixed; only the reading changes, which is why this document
+prints a placeholder rather than a timestamp that would be stale on arrival:
 
 ```text
-{clock}
+{CLOCK_PLACEHOLDER}
 ```
 
 ## 4 \u00b7 `CLOCK_GUARD` ({len(config.CLOCK_GUARD)} chars)
@@ -139,10 +157,11 @@ list, the approval protocol, and the recency rule that stops the model calling
 ## The assembled string
 
 Joined exactly as `agent.py` joins it -- every term separated by one space, the
-whole thing stripped:
+whole thing stripped. The clock is shown as a placeholder for the same reason
+as above; it is the only term that changes between calls.
 
 ```text
-{assembled}
+{assembled_placeholder}
 ```
 
 ## What is deliberately absent

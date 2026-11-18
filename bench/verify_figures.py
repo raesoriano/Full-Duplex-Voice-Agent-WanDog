@@ -37,7 +37,9 @@ RUN = ROOT / "bench" / "results" / "full-2026-11-18"
 DECK = ROOT / "ME 3 Deck v2"
 
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "bench"))
 import config  # noqa: E402
+from gen_prompt_v2 import CLOCK_PLACEHOLDER  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. read the run
@@ -302,14 +304,21 @@ def check(verbose: bool = True) -> list[str]:
             val = getattr(config, name)
             if val not in files["prompt_full.md"]:
                 problems.append(f"prompt_full.md: {name} is not verbatim")
+        # The clock term is the one thing that changes per call, so the document
+        # carries a placeholder instead of a reading. Comparing against the live
+        # clock_line() made this check fail against a clean checkout at every
+        # minute but the one the file was generated in.
         assembled = (config.SYSTEM_PROMPT + " " + config.OWNER_PROMPT
-                     + " " + config.clock_line() + " " + config.CLOCK_GUARD).strip()
+                     + " " + CLOCK_PLACEHOLDER + " " + config.CLOCK_GUARD).strip()
         assembled = (assembled + " " + config.TOOLS_SYSTEM_PROMPT).strip()
         if assembled not in files["prompt_full.md"]:
             problems.append("prompt_full.md: the assembled string does not match "
                             "agent.py:709-712")
         if verbose:
-            print(f"{'prompt':<16}{f'{len(assembled):,} chars':<14}config.py, joined as agent.py does")
+            real = (config.SYSTEM_PROMPT + " " + config.OWNER_PROMPT
+                    + " " + config.clock_line() + " " + config.CLOCK_GUARD).strip()
+            real = (real + " " + config.TOOLS_SYSTEM_PROMPT).strip()
+            print(f"{'prompt':<16}{f'{len(real):,} chars':<14}config.py, joined as agent.py does")
     if "prompt.md" in files:
         if len(files["prompt.md"]) > 2200:
             problems.append(f"prompt.md: {len(files['prompt.md'])} chars, over the "
