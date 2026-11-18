@@ -1054,3 +1054,88 @@ old path in their embedded filenames; that is harmless, they are byte-code cache
 and get rewritten when their source is next compiled.
 
 `secrets.yaml` stays gitignored; only `secrets.example.yaml` is tracked.
+
+## 16. A wordless turn now ends, a mute now mutes, and Ctrl+Enter interrupts
+
+Reported: "when the message is just typed while muted, the agent does not answer
+and the turn is not ending sometimes", plus "allow ctrl+enter to also interrupt
+similarly to the stop button".
+
+### The turn that did not end
+
+`turn_in_flight()` reads the tail of the event log to decide whether the
+composer shows Send or Stop. It cleared `busy` on `bot_stopped`, `interrupted`,
+`cleared` and `session_end` -- but **not on `user_stopped`**.
+
+A voice turn opens on `user_started` (the VAD fired) and is only answered if a
+transcript follows. Muted, or a cough, or a door gives `user_started` ->
+`user_stopped` with no `user_text`: the turn is over, nothing will be answered,
+and nothing is running. The button stayed on Stop anyway, until the 90 s
+staleness guard expired. That is the "turn is not ending".
+
+Measured on the real log, replaying it through the function: four turns ended
+with no transcript, and three of them left the button on **STOP** -- the tail of
+the session (10:19:28) being one of them.
+
+`user_stopped` now ends the turn, but only when no transcript arrived during it.
+The distinction is load-bearing in both directions: with no words there is
+nothing coming and nothing to stop, while with words the answer is still owed --
+the log shows 1.4-1.8 s between `user_stopped` and `bot_started`, and Stop has
+to stay available across that gap. All 19 real turns now read correctly: the 4
+wordless ones say Send, the 15 answered ones keep Stop.
+
+Two smaller things fell out of the same function:
+
+- `user_started` and `user_partial` now refresh the staleness clock. `user_started`
+  sets `busy`, and partials are proof the person is still talking, so a sentence
+  longer than 90 s would otherwise read as idle mid-sentence.
+- An `error` ends the turn. A failed inference pushes an ErrorFrame and no
+  `bot_stopped`, so the button previously waited out the guard with nothing to
+  stop -- "gave up, but still says Stop".
+
+### A mute that did not mute
+
+`MicControlWatcher._watch()` skipped the first read (`if self._last is not
+None`), on the reasoning that the STT starts unmuted so "enabled" is already the
+truth. That holds only for enabled. With the dashboard left muted, the agent
+started, read `enabled=False`, recorded it, pushed nothing -- and never pushed
+again, because the value never changed.
+
+Measured: the agent was started against `{"enabled": false}` and the STT still
+transcribed ("What in the dog?"). The mic was live while the UI said muted, so
+speech the person believed was ignored still became a turn. The first read is
+now applied; started muted sends `STTMuteFrame(mute=True)`, started live sends
+`mute=False`.
+
+### Errors were invisible
+
+`WanDogLogger` did `logger.error()` on an ErrorFrame and nothing else, so a
+failed turn looked exactly like a slow one: the question sat there, no reply
+came, and nothing said why. Errors are now published on the bus and rendered in
+the transcript. The agent cannot answer what it never heard, but it can stop
+lying about why it went quiet.
+
+### Ctrl+Enter interrupts
+
+The JS backstop returned early when the Send button was absent -- which is
+exactly when the button is Stop, i.e. mid-turn. So Ctrl+Enter was dead at the
+one moment it is wanted, with the mouse needed for the button.
+
+It now reads the control that is showing: Stop present -> interrupt, Send
+present -> send. While busy the box is not sent, so an interrupt does not
+swallow a half-written message. Verified in headless Chromium with a real key
+event through the browser's input pipeline, both states.
+
+### Testing notes
+
+`test_muted_turn.py` (no browser, no model): 10 turn-state cases, the mute on
+first read both ways, and the error event. `test_ctrl_enter_interrupt.py` (live,
+headless Chromium over CDP): Ctrl+Enter interrupts when busy and sends when idle.
+
+Two traps worth remembering. The repro scripts set `config.DASHBOARD_LOG` but
+`eventbus` binds its output path at import, so they appended to the **live** log;
+24 test events had to be trimmed back out. And `test_ctrl_enter_interrupt.py`
+rewrites the log to force the busy state, so it backs the log up and restores it
+-- an early version without the backup overwrote a real session. Both control
+files are consumed by the agent within a poll, so the test asserts on the log,
+not on the file: the click was working all along and the file was already gone.

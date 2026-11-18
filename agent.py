@@ -104,16 +104,32 @@ class MicControlWatcher(FrameProcessor):
             return True
 
     async def _watch(self):
+        # The FIRST read is applied, not just remembered.
+        #
+        # It used to be skipped (`if self._last is not None`), on the reasoning
+        # that the STT starts unmuted so "enabled" is already the truth. That
+        # holds only for enabled. With the dashboard left muted, the agent
+        # started, read enabled=False, recorded it, pushed nothing -- and then
+        # never pushed again, because the value never changed. Measured: the
+        # agent was started against {"enabled": false} and the STT still
+        # transcribed ("What in the dog?"). The mic was live while the UI said
+        # it was muted, so speech the person thought was ignored still became a
+        # turn.
+        #
+        # Pushing the initial state is harmless when it agrees (the STT is
+        # already unmuted) and is the only thing that makes a persisted "muted"
+        # true when it disagrees.
+        first = True
         while True:
             enabled = self._read()
-            if enabled != self._last:
-                if self._last is not None:
-                    logger.info("Mic {}", "enabled" if enabled else "muted")
-                    # Upstream: the STT sits before us in the pipeline.
-                    await self.push_frame(
-                        STTMuteFrame(mute=not enabled), FrameDirection.UPSTREAM
-                    )
+            if first or enabled != self._last:
+                logger.info("Mic {}", "enabled" if enabled else "muted")
+                # Upstream: the STT sits before us in the pipeline.
+                await self.push_frame(
+                    STTMuteFrame(mute=not enabled), FrameDirection.UPSTREAM
+                )
                 self._last = enabled
+                first = False
             await asyncio.sleep(self._poll)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -342,6 +358,24 @@ class WanDogLogger(FrameProcessor):
                 await self.bus.emit("bot_stopped")
         elif isinstance(frame, ErrorFrame):
             logger.error(" {}", frame.error)
+            # An error is part of the record, not just the console log.
+            #
+            # This used to be logger.error() and nothing else, so a failed turn
+            # was indistinguishable from a slow one on the dashboard: the
+            # question appeared, no reply appeared, and the composer sat on Stop
+            # because no bot_stopped ever came. The person could not tell
+            # "still thinking" from "gave up", and had nothing to act on.
+            #
+            # ``fatal`` is carried through so the page can say whether the
+            # pipeline died or just this turn failed. Errors also end the turn
+            # (see dashboard.turn_in_flight), which is what puts the Send button
+            # back.
+            if self.bus is not None:
+                await self.bus.emit(
+                    "error",
+                    text=str(getattr(frame, "error", "") or ""),
+                    fatal=bool(getattr(frame, "fatal", False)),
+                )
 
 
 class PartialTranscriptTap(FrameProcessor):

@@ -718,16 +718,63 @@ TURN_STALE_SECS = 90.0
 
 
 def turn_in_flight(events: list) -> bool:
-    """True when the agent is working on a turn the person could still stop."""
+    """True when the agent is working on a turn the person could still stop.
+
+    Two things end a turn that used to be missed, both reported as "the turn
+    does not end sometimes":
+
+    ``user_stopped`` with no transcript. A turn opens on ``user_started`` (the
+    VAD fired). It is only answered if a transcript follows. When the mic is
+    muted, or the person coughs and says nothing, the turn closes with
+    ``user_stopped`` and NO ``user_text`` -- and since ``user_stopped`` did not
+    clear ``busy``, the button stayed on Stop for a turn that had already
+    finished and would never be answered. Measured on the real log: the final
+    ``user_stopped`` (10:19:28) left this function returning True, so Stop
+    stayed up until the 90 s staleness guard expired.
+
+    So ``user_stopped`` ends the turn only when no transcript arrived during it.
+    The distinction matters both ways: with no words there is nothing coming and
+    nothing to stop, while with words the answer is still owed -- the real log
+    shows 1.4-1.8 s between ``user_stopped`` and ``bot_started``, and Stop must
+    stay available through that gap.
+
+    ``error``. A failed inference pushes an ErrorFrame and no bot_stopped, so
+    without this the button waited out the staleness guard with nothing to
+    stop. An error ends the turn.
+
+    ``interrupted`` deliberately stays an ender rather than a starter: pressing
+    Stop must put Send back at once, not wait for the agent to acknowledge.
+    """
     busy = False
     last_ts = None
+    # Did a transcript arrive during the current spoken turn? Set False when the
+    # person starts talking, True when words arrive. user_stopped reads it.
+    turn_has_words = False
     for ev in events:
         kind = ev.get("kind")
-        if kind in ("user_text", "bot_started", "tool_call", "user_started"):
+        if kind in ("user_text", "bot_started", "tool_call"):
             busy = True
-        elif kind in ("bot_stopped", "session_end", "interrupted", "cleared"):
+            if kind == "user_text":
+                turn_has_words = True
+        elif kind == "user_started":
+            # Listening. Stoppable, but no words yet, so this turn may end with
+            # nothing to answer.
+            busy = True
+            turn_has_words = False
+        elif kind == "user_stopped":
+            # The person stopped talking. If words arrived, the answer is still
+            # owed and the button stays Stop; if not, the turn is over.
+            busy = turn_has_words
+        elif kind in ("bot_stopped", "session_end", "interrupted", "cleared",
+                      "error"):
             busy = False
-        if kind in ("user_text", "bot_started", "bot_stopped", "tool_call", "interrupted"):
+        if kind in ("user_text", "bot_started", "bot_stopped", "tool_call",
+                    "interrupted", "user_stopped", "user_started", "error",
+                    "user_partial"):
+            # user_started and user_partial belong here. user_started now sets
+            # busy, and partials are proof the person is still talking, so
+            # neither may be measured against an older event: a sentence longer
+            # than TURN_STALE_SECS would otherwise read as idle mid-sentence.
             last_ts = ev.get("ts")
     if busy and last_ts is not None:
         try:
@@ -942,6 +989,18 @@ def render_event(ev: dict) -> None:
             unsafe_allow_html=True,
         )
 
+    elif kind == "error":
+        # The agent failed this turn. Before this existed the failure was only
+        # in the agent's console: the question sat there with no reply and no
+        # explanation, which reads as "the agent ignored me".
+        detail = str(ev.get("text", "") or "").strip()
+        st.error(
+            ("The agent stopped with an error" if ev.get("fatal")
+             else "That turn failed")
+            + (f": {detail[:300]}" if detail else ".")
+            + f"  \n`{ts}`"
+        )
+
     elif kind == "approval_requested":
         st.warning(
             f"Approval needed for {ev.get('tool', 'a tool')}: "
@@ -1073,6 +1132,9 @@ _AUTOSCROLL_JS = """
   // It is a BACKSTOP, not the mechanism: st.text_area already commits on
   // Ctrl+Enter itself. This only matters if that ever changes, and it fires on
   // the capture phase so it wins before the widget's own handler.
+  //
+  // Ctrl+Enter means Send when idle and Interrupt while a turn is running --
+  // the same two meanings the composer's one button carries.
   if (!W.__fwKeys) {
     W.__fwKeys = true;
     D.addEventListener('keydown', function (ev) {
@@ -1080,11 +1142,21 @@ _AUTOSCROLL_JS = """
       var t = ev.target;
       if (!t || t.tagName !== 'TEXTAREA') return;
       if (!t.closest('.st-key-composer')) return;
-      // Let the widget commit the value itself. Clicking Send here would race
-      // the commit and send an empty string -- measured: the box cleared and
-      // the message was lost.
+      // One key, two meanings, chosen by what the control is showing. While a
+      // turn is in flight the composer's button IS Stop, so Ctrl+Enter must
+      // interrupt -- that is the whole point of the shortcut, and returning
+      // early here (as this did) made Ctrl+Enter dead exactly when it was most
+      // wanted: mid-turn, with the mouse needed for the button.
+      //
+      // While busy the box is not sent, so the typed text stays where it is:
+      // an interrupt should not swallow a half-written message.
+      var stop = D.querySelector('.st-key-stopbtn button');
+      if (stop) { setTimeout(function () { stop.click(); }, 0); return; }
+      // Not busy: let the widget commit the value itself. Clicking Send here
+      // would race the commit and send an empty string -- measured: the box
+      // cleared and the message was lost.
       var b = D.querySelector('.st-key-sendbtn button');
-      if (!b) return;                       // busy: the control is Stop
+      if (!b) return;
       setTimeout(function () { b.click(); }, 0);
     }, true);
   }
@@ -1243,7 +1315,7 @@ def send_control() -> None:
         with st.container(key="stopbtn"):
             stop_clicked = st.button(
                 "", key="stopbtn_btn", icon=":material/stop:",
-                help="Stop this turn (like barge-in)",
+                help="Stop this turn (or press Ctrl+Enter)",
             )
         if stop_clicked:
             request_stop()
@@ -1256,7 +1328,7 @@ def send_control() -> None:
     with st.container(key="sendbtn"):
         send_clicked = st.button(
             "", key="sendbtn_btn", icon=":material/arrow_upward:",
-            help="Send (or press Ctrl+Enter)",
+            help="Send (or press Ctrl+Enter) \u00b7 Ctrl+Enter stops a turn in progress",
         )
     if send_clicked:
         # Read from session_state, not from the `typed` local: a fragment
