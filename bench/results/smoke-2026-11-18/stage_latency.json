@@ -1,0 +1,94 @@
+{
+  "about": "Stage latency per turn (course template, section 5). Times in seconds on the assistant machine's monotonic clock; e2e = audio_out - vad_end; e2e_heard = reply audio start - true end of speech (fdbench's audio clock); endpointing = vad_end - true end of speech.",
+  "phrases": 1,
+  "runs": 1,
+  "turns": [
+    {
+      "trial": "r01_stage_latency_phrase_dev_v1_interrupt_002",
+      "run": 1,
+      "clip": "phrase_dev_v1_interrupt_002",
+      "ref": "Could you suggest some books to help with personal development?",
+      "e2e": 2.3892,
+      "e2e_source": "marks",
+      "e2e_heard": 3.268,
+      "endpointing": 0.9069,
+      "asr_final": 1.0422,
+      "llm_ttft": 0.6735,
+      "tts_ttfb": 0.616,
+      "transcript": "Could you suggest some books to help with personal development?",
+      "context_tokens": 16,
+      "context_messages": 1,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 10,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    }
+  ],
+  "per_run": {
+    "1": {
+      "e2e": {
+        "n": 1,
+        "median": 2.3892,
+        "p95": 2.3892,
+        "mean": 2.3892,
+        "min": 2.3892,
+        "max": 2.3892,
+        "ci95_median": [
+          null,
+          null
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      },
+      "asr_final": {
+        "n": 1,
+        "median": 1.0422,
+        "p95": 1.0422,
+        "mean": 1.0422,
+        "min": 1.0422,
+        "max": 1.0422,
+        "ci95_median": [
+          null,
+          null
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      },
+      "llm_ttft": {
+        "n": 1,
+        "median": 0.6735,
+        "p95": 0.6735,
+        "mean": 0.6735,
+        "min": 0.6735,
+        "max": 0.6735,
+        "ci95_median": [
+          null,
+          null
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      },
+      "tts_ttfb": {
+        "n": 1,
+        "median": 0.616,
+        "p95": 0.616,
+        "mean": 0.616,
+        "min": 0.616,
+        "max": 0.616,
+        "ci95_median": [
+          null,
+          null
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      }
+    }
+  }
+}

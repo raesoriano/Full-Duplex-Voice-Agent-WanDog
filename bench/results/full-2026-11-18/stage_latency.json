@@ -1,0 +1,1101 @@
+{
+  "about": "Stage latency per turn (course template, section 5). Times in seconds on the assistant machine's monotonic clock; e2e = audio_out - vad_end; e2e_heard = reply audio start - true end of speech (fdbench's audio clock); endpointing = vad_end - true end of speech.",
+  "phrases": 10,
+  "runs": 3,
+  "turns": [
+    {
+      "trial": "r01_stage_latency_phrase_v15_backchannel_23",
+      "run": 1,
+      "clip": "phrase_v15_backchannel_23",
+      "ref": "Summarize data privacy clearly.",
+      "e2e": 2.6918,
+      "e2e_source": "marks",
+      "e2e_heard": 3.428,
+      "endpointing": 0.6793,
+      "asr_final": 0.9026,
+      "llm_ttft": 1.1764,
+      "tts_ttfb": 0.5348,
+      "transcript": "summarize data privacy clearly.",
+      "context_tokens": 183,
+      "context_messages": 11,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 4,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r01_stage_latency_phrase_v15_backchannel_7",
+      "run": 1,
+      "clip": "phrase_v15_backchannel_7",
+      "ref": "Give a detailed introduction to the stock market.",
+      "e2e": 2.0163,
+      "e2e_source": "marks",
+      "e2e_heard": 2.692,
+      "endpointing": 0.6472,
+      "asr_final": 0.9695,
+      "llm_ttft": 0.5154,
+      "tts_ttfb": 0.4814,
+      "transcript": "Give a detailed introduction to the stock market.",
+      "context_tokens": 131,
+      "context_messages": 9,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 8,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r01_stage_latency_phrase_v15_background_12",
+      "run": 1,
+      "clip": "phrase_v15_background_12",
+      "ref": "Check the status of my flight.",
+      "e2e": 1.9249,
+      "e2e_source": "marks",
+      "e2e_heard": 2.564,
+      "endpointing": 0.6472,
+      "asr_final": 0.9059,
+      "llm_ttft": 0.591,
+      "tts_ttfb": 0.3168,
+      "transcript": "Check the status of my flight.",
+      "context_tokens": 106,
+      "context_messages": 7,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 6,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r01_stage_latency_phrase_v15_background_25",
+      "run": 1,
+      "clip": "phrase_v15_background_25",
+      "ref": "Tell me a fun science fact.",
+      "e2e": 2.0564,
+      "e2e_source": "marks",
+      "e2e_heard": 2.66,
+      "endpointing": 0.6205,
+      "asr_final": 0.9772,
+      "llm_ttft": 0.7586,
+      "tts_ttfb": 0.2791,
+      "transcript": "Tell me a fun science fact.",
+      "context_tokens": 7,
+      "context_messages": 1,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 6,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r01_stage_latency_phrase_v15_background_3",
+      "run": 1,
+      "clip": "phrase_v15_background_3",
+      "ref": "What's the time in Tokyo?",
+      "e2e": 1.9756,
+      "e2e_source": "marks",
+      "e2e_heard": 2.596,
+      "endpointing": 0.6473,
+      "asr_final": 0.8983,
+      "llm_ttft": 0.5727,
+      "tts_ttfb": 0.3748,
+      "transcript": "What's the time in Tokyo?",
+      "context_tokens": 82,
+      "context_messages": 5,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 5,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r01_stage_latency_phrase_v15_background_54",
+      "run": 1,
+      "clip": "phrase_v15_background_54",
+      "ref": "What's the stock price of Tesla right now?",
+      "e2e": 2.0906,
+      "e2e_source": "marks",
+      "e2e_heard": 2.724,
+      "endpointing": 0.6475,
+      "asr_final": 0.9554,
+      "llm_ttft": 0.5976,
+      "tts_ttfb": 0.3822,
+      "transcript": "What's the stock price of Tesla right now?",
+      "context_tokens": 237,
+      "context_messages": 13,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 8,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r01_stage_latency_phrase_v15_background_84",
+      "run": 1,
+      "clip": "phrase_v15_background_84",
+      "ref": "Schedule a meeting with John on Friday at 2.",
+      "e2e": 1.8596,
+      "e2e_source": "marks",
+      "e2e_heard": 2.532,
+      "endpointing": 0.6899,
+      "asr_final": 0.9999,
+      "llm_ttft": 0.4819,
+      "tts_ttfb": 0.2772,
+      "transcript": "Schedule a meeting with John on Friday at 2.",
+      "context_tokens": 264,
+      "context_messages": 15,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 9,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r01_stage_latency_phrase_v15_interruption_165",
+      "run": 1,
+      "clip": "phrase_v15_interruption_165",
+      "ref": "How can I train my dog to follow basic commands?",
+      "e2e": 2.707,
+      "e2e_source": "marks",
+      "e2e_heard": 3.364,
+      "endpointing": 0.6473,
+      "asr_final": 0.9819,
+      "llm_ttft": 1.1526,
+      "tts_ttfb": 0.5038,
+      "transcript": "How can I train my dog to follow basic commands?",
+      "context_tokens": 338,
+      "context_messages": 19,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 10,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r01_stage_latency_phrase_v1_interrupt_174",
+      "run": 1,
+      "clip": "phrase_v1_interrupt_174",
+      "ref": "How can I protect my online accounts?",
+      "e2e": 2.1206,
+      "e2e_source": "marks",
+      "e2e_heard": 2.756,
+      "endpointing": 0.6475,
+      "asr_final": 0.9167,
+      "llm_ttft": 0.5413,
+      "tts_ttfb": 0.5891,
+      "transcript": "How can I protect my online account?",
+      "context_tokens": 285,
+      "context_messages": 17,
+      "wer": 0.14285714285714285,
+      "wer_detail": {
+        "ref_words": 7,
+        "edits": 1,
+        "wer": 0.14285714285714285
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r01_stage_latency_phrase_v1_interrupt_52",
+      "run": 1,
+      "clip": "phrase_v1_interrupt_52",
+      "ref": "What kind of movies do you think I would like?",
+      "e2e": 1.8432,
+      "e2e_source": "marks",
+      "e2e_heard": 2.468,
+      "endpointing": 0.6476,
+      "asr_final": 1.0175,
+      "llm_ttft": 0.5415,
+      "tts_ttfb": 0.2598,
+      "transcript": "What kind of movies do you think I would like?",
+      "context_tokens": 48,
+      "context_messages": 3,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 10,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r02_stage_latency_phrase_v15_backchannel_23",
+      "run": 2,
+      "clip": "phrase_v15_backchannel_23",
+      "ref": "Summarize data privacy clearly.",
+      "e2e": 2.1064,
+      "e2e_source": "marks",
+      "e2e_heard": 2.788,
+      "endpointing": 0.6795,
+      "asr_final": 0.8757,
+      "llm_ttft": 0.6211,
+      "tts_ttfb": 0.5624,
+      "transcript": "summarize data privacy clearly.",
+      "context_tokens": 704,
+      "context_messages": 39,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 4,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r02_stage_latency_phrase_v15_backchannel_7",
+      "run": 2,
+      "clip": "phrase_v15_backchannel_7",
+      "ref": "Give a detailed introduction to the stock market.",
+      "e2e": 2.7586,
+      "e2e_source": "marks",
+      "e2e_heard": 3.396,
+      "endpointing": 0.6473,
+      "asr_final": 0.9689,
+      "llm_ttft": 1.183,
+      "tts_ttfb": 0.5444,
+      "transcript": "Give a detailed introduction to the stock market.",
+      "context_tokens": 561,
+      "context_messages": 33,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 8,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r02_stage_latency_phrase_v15_background_12",
+      "run": 2,
+      "clip": "phrase_v15_background_12",
+      "ref": "Check the status of my flight.",
+      "e2e": 1.8916,
+      "e2e_source": "marks",
+      "e2e_heard": 2.532,
+      "endpointing": 0.6471,
+      "asr_final": 0.9026,
+      "llm_ttft": 0.5596,
+      "tts_ttfb": 0.3187,
+      "transcript": "Check the status of my flight.",
+      "context_tokens": 448,
+      "context_messages": 25,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 6,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r02_stage_latency_phrase_v15_background_25",
+      "run": 2,
+      "clip": "phrase_v15_background_25",
+      "ref": "Tell me a fun science fact.",
+      "e2e": 1.6941,
+      "e2e_source": "marks",
+      "e2e_heard": 2.34,
+      "endpointing": 0.6151,
+      "asr_final": 0.9276,
+      "llm_ttft": 0.5699,
+      "tts_ttfb": 0.1736,
+      "transcript": "Tell me a fun science fact.",
+      "context_tokens": 382,
+      "context_messages": 21,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 6,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r02_stage_latency_phrase_v15_background_3",
+      "run": 2,
+      "clip": "phrase_v15_background_3",
+      "ref": "What's the time in Tokyo?",
+      "e2e": 1.9626,
+      "e2e_source": "marks",
+      "e2e_heard": 2.596,
+      "endpointing": 0.6472,
+      "asr_final": 0.977,
+      "llm_ttft": 0.5022,
+      "tts_ttfb": 0.3652,
+      "transcript": "What's the time in Tokyo?",
+      "context_tokens": 423,
+      "context_messages": 23,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 5,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r02_stage_latency_phrase_v15_background_54",
+      "run": 2,
+      "clip": "phrase_v15_background_54",
+      "ref": "What's the stock price of Tesla right now?",
+      "e2e": 2.037,
+      "e2e_source": "marks",
+      "e2e_heard": 2.66,
+      "endpointing": 0.6472,
+      "asr_final": 0.9813,
+      "llm_ttft": 0.5099,
+      "tts_ttfb": 0.3933,
+      "transcript": "What's the stock price of Tesla right now?",
+      "context_tokens": 533,
+      "context_messages": 31,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 8,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r02_stage_latency_phrase_v15_background_84",
+      "run": 2,
+      "clip": "phrase_v15_background_84",
+      "ref": "Schedule a meeting with John on Friday at 2.",
+      "e2e": 1.8987,
+      "e2e_source": "marks",
+      "e2e_heard": 2.596,
+      "endpointing": 0.698,
+      "asr_final": 1.0109,
+      "llm_ttft": 0.5259,
+      "tts_ttfb": 0.2746,
+      "transcript": "Schedule a meeting with John on Friday at 2.",
+      "context_tokens": 471,
+      "context_messages": 27,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 9,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r02_stage_latency_phrase_v15_interruption_165",
+      "run": 2,
+      "clip": "phrase_v15_interruption_165",
+      "ref": "How can I train my dog to follow basic commands?",
+      "e2e": 1.9926,
+      "e2e_source": "marks",
+      "e2e_heard": 2.628,
+      "endpointing": 0.6473,
+      "asr_final": 1.0126,
+      "llm_ttft": 0.5125,
+      "tts_ttfb": 0.4492,
+      "transcript": "How can I train my dog to follow basic commands?",
+      "context_tokens": 662,
+      "context_messages": 37,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 10,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r02_stage_latency_phrase_v1_interrupt_174",
+      "run": 2,
+      "clip": "phrase_v1_interrupt_174",
+      "ref": "How can I protect my online accounts?",
+      "e2e": 2.0938,
+      "e2e_source": "marks",
+      "e2e_heard": 2.724,
+      "endpointing": 0.6473,
+      "asr_final": 0.9183,
+      "llm_ttft": 0.5848,
+      "tts_ttfb": 0.5511,
+      "transcript": "How can I protect my online account?",
+      "context_tokens": 615,
+      "context_messages": 35,
+      "wer": 0.14285714285714285,
+      "wer_detail": {
+        "ref_words": 7,
+        "edits": 1,
+        "wer": 0.14285714285714285
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r02_stage_latency_phrase_v1_interrupt_52",
+      "run": 2,
+      "clip": "phrase_v1_interrupt_52",
+      "ref": "What kind of movies do you think I would like?",
+      "e2e": 1.7829,
+      "e2e_source": "marks",
+      "e2e_heard": 2.404,
+      "endpointing": 0.6473,
+      "asr_final": 0.9984,
+      "llm_ttft": 0.4733,
+      "tts_ttfb": 0.2739,
+      "transcript": "What kind of movies do you think I would like?",
+      "context_tokens": 494,
+      "context_messages": 29,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 10,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r03_stage_latency_phrase_v15_backchannel_23",
+      "run": 3,
+      "clip": "phrase_v15_backchannel_23",
+      "ref": "Summarize data privacy clearly.",
+      "e2e": 2.0797,
+      "e2e_source": "marks",
+      "e2e_heard": 2.82,
+      "endpointing": 0.6785,
+      "asr_final": 0.896,
+      "llm_ttft": 0.6055,
+      "tts_ttfb": 0.5441,
+      "transcript": "summarize data privacy clearly.",
+      "context_tokens": 898,
+      "context_messages": 49,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 4,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r03_stage_latency_phrase_v15_backchannel_7",
+      "run": 3,
+      "clip": "phrase_v15_backchannel_7",
+      "ref": "Give a detailed introduction to the stock market.",
+      "e2e": 2.6498,
+      "e2e_source": "marks",
+      "e2e_heard": 3.268,
+      "endpointing": 0.6471,
+      "asr_final": 0.9668,
+      "llm_ttft": 1.1511,
+      "tts_ttfb": 0.5019,
+      "transcript": "Give a detailed introduction to the stock market.",
+      "context_tokens": 780,
+      "context_messages": 43,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 8,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r03_stage_latency_phrase_v15_background_12",
+      "run": 3,
+      "clip": "phrase_v15_background_12",
+      "ref": "Check the status of my flight.",
+      "e2e": 1.9544,
+      "e2e_source": "marks",
+      "e2e_heard": 2.596,
+      "endpointing": 0.6471,
+      "asr_final": 0.9537,
+      "llm_ttft": 0.5653,
+      "tts_ttfb": 0.3136,
+      "transcript": "Check the status of my flight.",
+      "context_tokens": 1062,
+      "context_messages": 57,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 6,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r03_stage_latency_phrase_v15_background_25",
+      "run": 3,
+      "clip": "phrase_v15_background_25",
+      "ref": "Tell me a fun science fact.",
+      "e2e": 1.9332,
+      "e2e_source": "marks",
+      "e2e_heard": 2.532,
+      "endpointing": 0.6139,
+      "asr_final": 0.9097,
+      "llm_ttft": 0.5956,
+      "tts_ttfb": 0.3822,
+      "transcript": "Tell me a fun science fact.",
+      "context_tokens": 867,
+      "context_messages": 47,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 6,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r03_stage_latency_phrase_v15_background_3",
+      "run": 3,
+      "clip": "phrase_v15_background_3",
+      "ref": "What's the time in Tokyo?",
+      "e2e": 2.0186,
+      "e2e_source": "marks",
+      "e2e_heard": 2.66,
+      "endpointing": 0.6472,
+      "asr_final": 0.9266,
+      "llm_ttft": 0.5562,
+      "tts_ttfb": 0.3965,
+      "transcript": "What's the time in Tokyo?",
+      "context_tokens": 1080,
+      "context_messages": 59,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 5,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r03_stage_latency_phrase_v15_background_54",
+      "run": 3,
+      "clip": "phrase_v15_background_54",
+      "ref": "What's the stock price of Tesla right now?",
+      "e2e": 1.9941,
+      "e2e_source": "marks",
+      "e2e_heard": 2.628,
+      "endpointing": 0.6474,
+      "asr_final": 0.9816,
+      "llm_ttft": 0.5134,
+      "tts_ttfb": 0.3773,
+      "transcript": "What's the stock price of Tesla right now?",
+      "context_tokens": 988,
+      "context_messages": 53,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 8,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r03_stage_latency_phrase_v15_background_84",
+      "run": 3,
+      "clip": "phrase_v15_background_84",
+      "ref": "Schedule a meeting with John on Friday at 2.",
+      "e2e": 1.9944,
+      "e2e_source": "marks",
+      "e2e_heard": 2.66,
+      "endpointing": 0.6835,
+      "asr_final": 0.9851,
+      "llm_ttft": 0.5095,
+      "tts_ttfb": 0.283,
+      "transcript": "Schedule a meeting with John on Friday at 2.",
+      "context_tokens": 756,
+      "context_messages": 41,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 9,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r03_stage_latency_phrase_v15_interruption_165",
+      "run": 3,
+      "clip": "phrase_v15_interruption_165",
+      "ref": "How can I train my dog to follow basic commands?",
+      "e2e": 2.0207,
+      "e2e_source": "marks",
+      "e2e_heard": 2.692,
+      "endpointing": 0.6471,
+      "asr_final": 0.9877,
+      "llm_ttft": 0.5237,
+      "tts_ttfb": 0.4692,
+      "transcript": "How can I train my dog to follow basic commands?",
+      "context_tokens": 1016,
+      "context_messages": 55,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 10,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r03_stage_latency_phrase_v1_interrupt_174",
+      "run": 3,
+      "clip": "phrase_v1_interrupt_174",
+      "ref": "How can I protect my online accounts?",
+      "e2e": 1.9566,
+      "e2e_source": "marks",
+      "e2e_heard": 2.596,
+      "endpointing": 0.6472,
+      "asr_final": 0.9633,
+      "llm_ttft": 0.5269,
+      "tts_ttfb": 0.4401,
+      "transcript": "How can I protect my online account?",
+      "context_tokens": 830,
+      "context_messages": 45,
+      "wer": 0.14285714285714285,
+      "wer_detail": {
+        "ref_words": 7,
+        "edits": 1,
+        "wer": 0.14285714285714285
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    },
+    {
+      "trial": "r03_stage_latency_phrase_v1_interrupt_52",
+      "run": 3,
+      "clip": "phrase_v1_interrupt_52",
+      "ref": "What kind of movies do you think I would like?",
+      "e2e": 1.8504,
+      "e2e_source": "marks",
+      "e2e_heard": 2.468,
+      "endpointing": 0.6474,
+      "asr_final": 0.9994,
+      "llm_ttft": 0.4822,
+      "tts_ttfb": 0.2699,
+      "transcript": "What kind of movies do you think I would like?",
+      "context_tokens": 950,
+      "context_messages": 51,
+      "wer": 0.0,
+      "wer_detail": {
+        "ref_words": 10,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ]
+    }
+  ],
+  "per_run": {
+    "1": {
+      "e2e": {
+        "n": 10,
+        "median": 2.03635,
+        "p95": 2.70016,
+        "mean": 2.1285999999999996,
+        "min": 1.8432,
+        "max": 2.707,
+        "ci95_median": [
+          1.9176,
+          2.3741000000000003
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      },
+      "asr_final": {
+        "n": 10,
+        "median": 0.96245,
+        "p95": 1.00958,
+        "mean": 0.9524900000000001,
+        "min": 0.8983,
+        "max": 1.0175,
+        "ci95_median": [
+          0.9059,
+          0.9909
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      },
+      "llm_ttft": {
+        "n": 10,
+        "median": 0.58185,
+        "p95": 1.16569,
+        "mean": 0.6929,
+        "min": 0.4819,
+        "max": 1.1764,
+        "ci95_median": [
+          0.5413,
+          0.8718824999999999
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      },
+      "tts_ttfb": {
+        "n": 10,
+        "median": 0.3785,
+        "p95": 0.564665,
+        "mean": 0.39990000000000003,
+        "min": 0.2598,
+        "max": 0.5891,
+        "ci95_median": [
+          0.2791,
+          0.5081
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      }
+    },
+    "2": {
+      "e2e": {
+        "n": 10,
+        "median": 1.9775999999999998,
+        "p95": 2.4651099999999992,
+        "mean": 2.0218300000000005,
+        "min": 1.6941,
+        "max": 2.7586,
+        "ci95_median": [
+          1.8916,
+          2.0938
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      },
+      "asr_final": {
+        "n": 10,
+        "median": 0.97295,
+        "p95": 1.0118349999999998,
+        "mean": 0.95733,
+        "min": 0.8757,
+        "max": 1.0126,
+        "ci95_median": [
+          0.9151,
+          0.9984
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      },
+      "llm_ttft": {
+        "n": 10,
+        "median": 0.5427500000000001,
+        "p95": 0.9301449999999994,
+        "mean": 0.60422,
+        "min": 0.4733,
+        "max": 1.183,
+        "ci95_median": [
+          0.5099,
+          0.5954999999999999
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      },
+      "tts_ttfb": {
+        "n": 10,
+        "median": 0.37925,
+        "p95": 0.557315,
+        "mean": 0.39064,
+        "min": 0.1736,
+        "max": 0.5624,
+        "ci95_median": [
+          0.2746,
+          0.5444
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      }
+    },
+    "3": {
+      "e2e": {
+        "n": 10,
+        "median": 1.99425,
+        "p95": 2.3932549999999995,
+        "mean": 2.0451900000000003,
+        "min": 1.8504,
+        "max": 2.6498,
+        "ci95_median": [
+          1.9544,
+          2.0373524999999995
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      },
+      "asr_final": {
+        "n": 10,
+        "median": 0.96505,
+        "p95": 0.994135,
+        "mean": 0.9569899999999999,
+        "min": 0.896,
+        "max": 0.9994,
+        "ci95_median": [
+          0.9266,
+          0.9851
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      },
+      "llm_ttft": {
+        "n": 10,
+        "median": 0.54155,
+        "p95": 0.9055799999999994,
+        "mean": 0.60294,
+        "min": 0.4822,
+        "max": 1.1511,
+        "ci95_median": [
+          0.5134,
+          0.5956
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      },
+      "tts_ttfb": {
+        "n": 10,
+        "median": 0.38935,
+        "p95": 0.52511,
+        "mean": 0.39778,
+        "min": 0.2699,
+        "max": 0.5441,
+        "ci95_median": [
+          0.3136,
+          0.471
+        ],
+        "p95_note": "with fewer than 20 trials p95 is close to the slowest trial"
+      }
+    }
+  }
+}

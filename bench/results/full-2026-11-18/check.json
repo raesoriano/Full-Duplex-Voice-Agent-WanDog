@@ -1,0 +1,93 @@
+{
+  "checks": [
+    {
+      "ok": true,
+      "text": "Python 3.12.16",
+      "fix": "Python 3.10 or newer is needed"
+    },
+    {
+      "ok": true,
+      "text": "packages: core ok",
+      "fix": "pip install -r requirements.txt"
+    },
+    {
+      "ok": true,
+      "text": "scoring extras: ASR (faster-whisper) · not installed: pitch/intensity (praat-parselmouth), UTMOSv2 quality",
+      "fix": "pip install -r requirements-score.txt (laptop) to score transcripts and voice change"
+    },
+    {
+      "ok": true,
+      "text": "Raspberry Pi 5 Model B Rev 1.0 · 7.9 GB RAM · 9.4 GB free",
+      "fix": ""
+    },
+    {
+      "ok": true,
+      "text": "CPU 56 °C",
+      "fix": "add a fan or heatsink; throttling slows the assistant and skews latencies"
+    },
+    {
+      "ok": false,
+      "text": "network: wifi",
+      "fix": "use Ethernet if you can; Wi-Fi jitter widens latencies"
+    },
+    {
+      "ok": true,
+      "text": "datasets: 430 clips in 10 groups",
+      "fix": "python tools/fetch_datasets.py --force gets the full set"
+    },
+    {
+      "ok": true,
+      "text": "dataset checksums ok (sampled)",
+      "fix": "rebuild the datasets"
+    },
+    {
+      "ok": true,
+      "text": "rig: direct feed on ws://127.0.0.1:8791 (no audio devices used)",
+      "fix": ""
+    },
+    {
+      "ok": true,
+      "text": "assistant project: /home/raesoriano/sandbox/WanDog-repo",
+      "fix": "clone fd-benchmark inside the project folder, or set FDBENCH_PROJECT in fd-benchmark/.env"
+    },
+    {
+      "ok": true,
+      "text": "assistant python: /home/raesoriano/sandbox/WanDog-repo/.venv/bin/python",
+      "fix": "create the project's venv, or set FDBENCH_ASSISTANT_PYTHON in fd-benchmark/.env"
+    },
+    {
+      "ok": true,
+      "text": "judge: none (timing and turn-taking metrics only; judge later with `score`)",
+      "fix": ""
+    }
+  ],
+  "info": {
+    "os": "Linux 6.18.50+rpt-rpi-2712",
+    "machine": "aarch64",
+    "pi_model": "Raspberry Pi 5 Model B Rev 1.0",
+    "ram_gb": 7.9,
+    "python": "3.12.16",
+    "network": "wifi",
+    "pi_temp_c": 55.65,
+    "pi_throttled": {
+      "raw": "0x0",
+      "under_voltage_now": false,
+      "freq_capped_now": false,
+      "throttled_now": false,
+      "soft_temp_limit_now": false,
+      "under_voltage_ever": false,
+      "freq_capped_ever": false,
+      "throttled_ever": false,
+      "soft_temp_limit_ever": false
+    },
+    "disk_free_gb": 9.4,
+    "hostname": "raspbeby-pi",
+    "optional": {
+      "ASR (faster-whisper)": true,
+      "pitch/intensity (praat-parselmouth)": false,
+      "UTMOSv2 quality": false
+    },
+    "fdbench": "0.1.0"
+  },
+  "devices": {}
+}

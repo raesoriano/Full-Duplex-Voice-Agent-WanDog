@@ -1,0 +1,142 @@
+{
+  "student": "wandog",
+  "run_id": "2026-11-18_18-27-10",
+  "started": "2026-11-18T18:27:10+08:00",
+  "rounds": 1,
+  "seed": 450687,
+  "fdbench": "0.1.0",
+  "rig": "direct",
+  "judge": null,
+  "machine": {
+    "os": "Linux 6.18.50+rpt-rpi-2712",
+    "machine": "aarch64",
+    "pi_model": "Raspberry Pi 5 Model B Rev 1.0",
+    "ram_gb": 7.9,
+    "python": "3.12.16",
+    "network": "wifi",
+    "pi_temp_c": 55.65,
+    "pi_throttled": {
+      "raw": "0x0",
+      "under_voltage_now": false,
+      "freq_capped_now": false,
+      "throttled_now": false,
+      "soft_temp_limit_now": false,
+      "under_voltage_ever": false,
+      "freq_capped_ever": false,
+      "throttled_ever": false,
+      "soft_temp_limit_ever": false
+    },
+    "disk_free_gb": 9.4,
+    "hostname": "raspbeby-pi",
+    "optional": {
+      "ASR (faster-whisper)": true,
+      "pitch/intensity (praat-parselmouth)": false,
+      "UTMOSv2 quality": false
+    },
+    "fdbench": "0.1.0"
+  },
+  "devices": {},
+  "warnings_overridden": [
+    "network: wifi"
+  ],
+  "dataset": "datasets",
+  "dataset_counts": {
+    "v1_pause_synth": 30,
+    "v1_pause_candor": 30,
+    "v1_turntaking": 30,
+    "v1_interrupt": 30,
+    "v15_interruption": 30,
+    "v15_backchannel": 30,
+    "v15_talking_to_other": 30,
+    "v15_background": 30,
+    "false_tt": 40,
+    "stage_latency": 150
+  },
+  "stage_test": {
+    "phrases": 10,
+    "runs": 3,
+    "phrases_dir": null
+  },
+  "targets": {
+    "e2e": 4.0,
+    "asr_final": 0.8,
+    "llm_ttft": 1.5,
+    "tts_ttfb": 0.6,
+    "barge_in": 0.8,
+    "wer": 0.15
+  },
+  "where": "local",
+  "link": {
+    "peer": "127.0.0.1:57644",
+    "rtt_ms": 1.9240329984313576,
+    "host": "127.0.0.1",
+    "port": 8791,
+    "disconnects": 1
+  },
+  "machine_stats": {
+    "hello": {
+      "host": "raspbeby-pi",
+      "os": "Linux 6.18.50+rpt-rpi-2712",
+      "machine": "aarch64",
+      "pi_model": "Raspberry Pi 5 Model B Rev 1.0",
+      "ncpu": 4,
+      "caps": {
+        "backend": "procfs",
+        "cpu": true,
+        "cores": true,
+        "memory": true,
+        "processes": true,
+        "temperature": true,
+        "clock": true,
+        "throttle": true
+      },
+      "slow_every": 2.0,
+      "patterns": {
+        "asr_mcp": "mcp_servers.asr",
+        "tts_mcp": "mcp_servers.tts",
+        "tools_mcp": "mcp_servers.tools"
+      },
+      "python": "3.12.16",
+      "ram_mb": 8062,
+      "network": "wifi",
+      "link_network": "same machine",
+      "source": "remote"
+    },
+    "samples": 794,
+    "clock_offset": 0.0006735179995303042
+  },
+  "marks": {
+    "stages_seen": {
+      "vad_start": 208,
+      "asr_partial": 367,
+      "interrupted": 98,
+      "vad_end": 208,
+      "asr_final": 52,
+      "llm_request": 94,
+      "user_stopped": 98,
+      "llm_first_token": 49,
+      "tts_request": 49,
+      "tts_first_audio": 49,
+      "audio_out": 98,
+      "bot_stopped": 98
+    },
+    "n": 1468,
+    "clock_offsets": {
+      "ws": 0.0005945180000708206
+    }
+  },
+  "models": {
+    "harness": "pipecat 1.15.0",
+    "ASR": "sherpa-onnx streaming zipformer (streaming)",
+    "LLM": "gemma4:31b-cloud",
+    "TTS": "Piper en_US-ryan-medium",
+    "VAD": "Silero ONNX"
+  },
+  "finished": "2026-11-18T18:40:28+08:00",
+  "outcome": {
+    "completed": 40,
+    "total": 40,
+    "stopped_early": false,
+    "seconds": 788.5169600570007
+  }
+}
