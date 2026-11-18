@@ -14,6 +14,9 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
+# The throwaway root every launch in this file uses.
+import tempfile
+ROOT = Path(tempfile.mkdtemp(prefix="fw_launch_"))
 
 CODE = r'''
 import sys, json
@@ -38,6 +41,10 @@ def run(*extra: str) -> dict:
     child = dict(os.environ)
     child.pop("WANDOG_DASHBOARD_LOG", None)
     child.pop("WANDOG_SESSION_ROLE", None)
+    # A throwaway root. Without this the test would mint real sessions beside
+    # the checkout every time it ran -- the behaviour under test is "which
+    # session is this", not "put it here".
+    child["WANDOG_SESSIONS_ROOT"] = str(ROOT)
     r = subprocess.run([sys.executable, "-c", CODE, *extra],
                        capture_output=True, text=True, cwd=str(REPO), env=child)
     if r.returncode != 0:
