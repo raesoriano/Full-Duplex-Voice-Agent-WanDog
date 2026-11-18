@@ -1258,6 +1258,29 @@ if "mic_on" not in ss:
 # still showed Stop for 16 s and only reverted on the next click.
 
 
+def toggle_mic() -> None:
+    """Flip the mic, before the page re-renders.
+
+    This is a callback rather than an ``if clicked:`` block for one reason:
+    Streamlit renders the button -- and therefore its tooltip -- BEFORE the
+    click handler runs. Flipping ``mic_on`` after the render meant the tooltip
+    always described the state BEFORE the click, so after muting it still said
+    "Listening" until some other interaction forced another rerun.
+
+    Measured on the old code, clicking twice:
+
+        run0  mic_on=True   file=None               tooltip "Listening"   ok
+        run1  mic_on=False  file={"enabled":false}  tooltip "Listening"   WRONG
+        run2  mic_on=True   file={"enabled":true}   tooltip "Muted"       WRONG
+
+    Exactly one click behind, in both directions -- the "flipped" report. An
+    ``on_click`` callback runs before the script reruns, so ``mic_on`` is
+    already correct when ``help`` is computed.
+    """
+    ss["mic_on"] = not ss["mic_on"]
+    set_mic_state(ss["mic_on"])
+
+
 def mic_button() -> None:
     live = ss["mic_on"]
     # A plain button rather than st.toggle: the switch widget cannot be made to
@@ -1270,19 +1293,32 @@ def mic_button() -> None:
     # The icon span inherits the button's colour, which is what lets one CSS
     # rule turn it blue while listening and leave it the text colour when not.
     with st.container(key="micbtn"):
-        clicked = st.button(
+        st.button(
             "",
             key="micbtn_btn",
             icon=":material/mic:",
+            # The tooltip states the CURRENT state first, then what the click
+            # will do, and both halves name the same verb the click performs.
+            #
+            # It used to read "Listening - ... Click to mute." / "Muted - ...
+            # Click to listen." -- a bare adjective with no subject, so it read
+            # as a command rather than a status ("Muted" could be read as "be
+            # muted"), and the two sentences did not share a shape. Reported as
+            # "the description on the mute button is flipped or ambiguous".
+            #
+            # "Currently <state>" makes the subject explicit and puts the state
+            # and the action in one sentence each, so the pair can be read at a
+            # glance: the state shown is the state you are in, and the verb is
+            # what the click does.
             help=(
-                "Listening \u2014 the agent is accepting audio. Click to mute."
+                "Currently Listening - the agent is accepting audio. "
+                "Click to Mute"
                 if live
-                else "Muted \u2014 the agent will not transcribe. Click to listen."
+                else "Currently Muted - the agent will not transcribe. "
+                "Click to Listen"
             ),
+            on_click=toggle_mic,
         )
-    if clicked:
-        ss["mic_on"] = not live
-        set_mic_state(ss["mic_on"])
 
 
 # The Send/Stop swap, in a fragment that re-runs on a timer.
