@@ -43,6 +43,10 @@ import sys
 
 import config
 
+# What pipecat's OpenAI adapter puts in `tools` when the context carries
+# none. It is falsy, which is exactly what the token-budget override tests.
+from openai import NOT_GIVEN as OPENAI_NOT_GIVEN_SENTINEL
+
 FAILS: list[str] = []
 
 
@@ -245,6 +249,125 @@ def test_repo_settings_guidance() -> bool:
     return ok
 
 
+# ---------------------------------------------------------------------------
+# 9. A tool call gets a tool budget, not a speech budget
+# ---------------------------------------------------------------------------
+def test_tool_call_gets_tool_budget() -> bool:
+    print("\n9. a tool-calling turn is allowed to finish its arguments")
+    import asyncio
+
+    from agent import ClockedLLMService
+    from pipecat.services.openai.llm import OpenAILLMService
+
+    ok = check("the tool cap exceeds the speech cap",
+               config.LLM_TOOL_MAX_TOKENS > config.LLM_MAX_TOKENS,
+               f"{config.LLM_MAX_TOKENS} -> {config.LLM_TOOL_MAX_TOKENS}")
+    ok &= check("the speech cap is still small", config.LLM_MAX_TOKENS <= 512,
+                str(config.LLM_MAX_TOKENS))
+
+    llm = ClockedLLMService(
+        api_key="test-key", base_url=config.LLM_BASE_URL,
+        settings=OpenAILLMService.Settings(
+            model=config.LLM_MODEL, system_instruction="x",
+            max_tokens=config.LLM_MAX_TOKENS))
+
+    def params_for(tools):
+        # NOT_GIVEN is what the adapter returns when there are no tools; it is
+        # falsy, which is exactly what the override tests for.
+        return {"model": config.LLM_MODEL, "tools": tools,
+                "max_tokens": config.LLM_MAX_TOKENS,
+                "max_completion_tokens": OPENAI_NOT_GIVEN_SENTINEL}
+
+    speech = llm.build_chat_completion_params(params_for(OPENAI_NOT_GIVEN_SENTINEL))
+    ok &= check("a turn without tools keeps the speech cap",
+                speech["max_tokens"] == config.LLM_MAX_TOKENS,
+                str(speech["max_tokens"]))
+
+    with_tools = llm.build_chat_completion_params(params_for([{"type": "function"}]))
+    ok &= check("a turn with tools gets the tool cap",
+                with_tools["max_tokens"] == config.LLM_TOOL_MAX_TOKENS,
+                str(with_tools["max_tokens"]))
+    ok &= check("an unset max_completion_tokens is left to the provider",
+                with_tools["max_completion_tokens"] is OPENAI_NOT_GIVEN_SENTINEL)
+    ok &= check("it is a ceiling, not a forced length",
+                config.LLM_TOOL_MAX_TOKENS >= 8192,
+                f"measured: a 19.5 KB file needs >4096")
+    return ok
+
+
+# ---------------------------------------------------------------------------
+# 10. A pathless write is reported as truncation, not a forgotten argument
+# ---------------------------------------------------------------------------
+def test_pathless_write_names_truncation() -> bool:
+    print("\n10. a write_file with no path says why, and does not repeat")
+    import mcp_bridge
+
+    body = "x" * 5000
+    hint = mcp_bridge._missing_path_hint("write_file", {"content": body})
+    ok = check("it fires when the body arrived but the path did not",
+               bool(isinstance(hint, str) and hint))
+    if not hint:
+        return False
+    ok &= check("it reports the size that actually arrived", "5000" in hint)
+    ok &= check("it names truncation as the cause", "cut off" in hint)
+    ok &= check("it says the path comes after the body", "after the body" in hint)
+    ok &= check("it warns that an identical retry fails",
+                "fail the same way" in hint)
+    ok &= check("it offers the chunked route", 'mode=\"append\"' in hint)
+
+    # It must stay out of the way everywhere else.
+    ok &= check("a call that has a path is untouched",
+                mcp_bridge._missing_path_hint(
+                    "write_file", {"content": body, "path": "a.html"}) is None)
+    ok &= check("another tool is untouched",
+                mcp_bridge._missing_path_hint("bash", {"command": "ls"}) is None)
+    ok &= check("a call with no body is untouched (a real omission)",
+                mcp_bridge._missing_path_hint("write_file", {}) is None)
+    ok &= check("edit_file is covered too",
+                isinstance(mcp_bridge._missing_path_hint(
+                    "edit_file", {"new_string": body}), str))
+    return ok
+
+
+# ---------------------------------------------------------------------------
+# 11. The log can show how big a call really was
+# ---------------------------------------------------------------------------
+def test_tool_call_records_real_size() -> bool:
+    print("\n11. the event log records the real argument size")
+    import mcp_bridge
+
+    big = {"content": "x" * 19000, "path": "a.html"}
+    ok = check("args_chars is the true size, not the 600-char dashboard cap",
+               mcp_bridge._args_chars(big) > 19000,
+               str(mcp_bridge._args_chars(big)))
+    # 600 chars of payload plus the " \u2026" truncation marker.
+    ok &= check("the dashboard field is still capped",
+               len(mcp_bridge._short(big)) <= 602,
+               str(len(mcp_bridge._short(big))))
+    ok &= check("the two disagree, which is the point",
+               mcp_bridge._args_chars(big) > len(mcp_bridge._short(big)))
+    ok &= check("a string argument is measured as-is",
+               mcp_bridge._args_chars("abcd") == 4)
+    return ok
+
+
+# ---------------------------------------------------------------------------
+# 12. The prompt tells the model how to avoid it
+# ---------------------------------------------------------------------------
+def test_write_guidance_in_prompt() -> bool:
+    print("\n12. the prompt asks for a path and a chunked long write")
+    p = config.TOOLS_SYSTEM_PROMPT
+    ok = check("it requires a path", "always pass `path`" in p)
+    ok &= check("it asks for the path before the content",
+                "before the content" in p)
+    ok &= check("it forbids repeating a cut-off call",
+                "do not repeat the same call" in p)
+    ok &= check("it names the chunked route", 'mode=\"append\"' in p)
+    ok &= check("it says a long file may not fit", "may not fit" in p)
+    return ok
+
+
+
 def main() -> int:
     results = [
         test_github_instruction(),
@@ -255,6 +378,10 @@ def main() -> int:
         test_github_name_is_qualified(),
         test_github_404_guidance(),
         test_repo_settings_guidance(),
+        test_tool_call_gets_tool_budget(),
+        test_pathless_write_names_truncation(),
+        test_tool_call_records_real_size(),
+        test_write_guidance_in_prompt(),
     ]
     print("\n--- summary ---")
     print(f"  {sum(results)}/{len(results)} groups passed")

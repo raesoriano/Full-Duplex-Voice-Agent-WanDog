@@ -1398,3 +1398,128 @@ fact rather than as a missing tool.
 prompt does not advertise `gh`. 8/8 groups pass. Probe repositories
 (`wandog-pages-probe`, `-2`, `-3`) were created and deleted during measurement;
 the account is back to its 22.
+
+## 20. `write_file` was never forgetting the path — it was out of tokens
+
+Reported as "it is having trouble writing files", from a session where the
+person asked for a flappy bird clone. The agent answered "Writing the file."
+eleven times in a row, never wrote anything, and apologised: *"I am so sorry, I
+keep forgetting to include the file path!"* It was wrong about itself.
+
+### What the log shows
+
+`/tmp/wandog_events.jsonl`, 18 Nov 2026:
+
+| | |
+|---|---|
+| `write_file` calls | 26 |
+| failed | **24** |
+| succeeded | 2 (idx 586, 1640 — both small files) |
+| failures that were `Missing required argument(s): path.` | **24 of 24** |
+| longest unbroken run | 11 attempts (idx 1756-1854), then 11 more (2328-2409) |
+
+Every single failure is the same one argument, and every call *did* return a
+result — so the JSON parsed fine and `path` was simply not in it. Nothing was
+silently dropped.
+
+### Why
+
+`config.LLM_MAX_TOKENS` was **300**, and it was applied to every request. That
+is a *speech* budget — one or two sentences, about 40 tokens. A turn that calls
+`write_file` spends that same budget on the file.
+
+The model emits the arguments body-first, path-last:
+
+```
+{"content": "<the entire 5 KB HTML file>", "path": "flappy_bird.html"}
+```
+
+So a cap that cuts the stream inside `content` closes the JSON **before `path`
+is ever emitted**. Measured against the live model, the real 14-tool schemas,
+and the actual question:
+
+| `max_tokens` | `finish_reason` | argument length | keys emitted |
+|---|---|---|---|
+| 300 | `length` | ~1127 | `['content']` |
+| 600 | `length` | ~2030 | `['content']` |
+| 1000 | `length` | ~3900 | `['content']` |
+| 4096 | `tool_calls` | ~5840 | `['content', 'path']` |
+| 8192 | `tool_calls` | ~5760 | `['content', 'path']` |
+
+A 5 KB file needs roughly 1500 tokens. **300 could never fit one**, so retrying
+was futile — which is exactly the loop the log shows.
+
+The error message made it worse. `Missing required argument(s): path.` is
+literally true and actively misleading: it points at the model's intent when
+the cause is the token budget. The model believed it, apologised for it, and
+retried identically.
+
+### The fix, in two layers
+
+1. **`config.LLM_TOOL_MAX_TOKENS` (8192), applied only when the request carries
+   tools** (`agent.py`, `ClockedLLMService.build_chat_completion_params`). A
+   plain spoken turn keeps the 300-token speech ceiling.
+
+   It is a ceiling, not a target, so speech is unchanged: "What is the capital
+   of France?" measured **31 characters and 0.6 s at both 300 and 8192**. The
+   only cost is on a turn that actually writes something — 1.9 s to 3.3 s for a
+   5 KB file.
+
+2. **`mcp_bridge._missing_path_hint`** — if a call still arrives pathless with
+   a body, the error names truncation, says the path comes after the body, warns
+   that an identical retry fails, and offers `mode="append"` chunking.
+
+Measured on the live model, 4 trials per question:
+
+| Question | Old cap 300 | New cap 8192 |
+|---|---|---|
+| flappy bird clone → one HTML file | 4/4 body, no path | **4/4 path present** |
+| portfolio site → `index.html` | 4/4 body, no path | **4/4 path present** |
+
+And through the real `ClockedLLMService` → real MCP server, the file landed:
+
+```
+request max_tokens = 8192  tools present = True
+finish = tool_calls  keys = ['content', 'path']  content_len = 4954
+write_file -> {"path": "/tmp/onit/data/flappy_bird.html", "size_bytes": 4954,
+               "status": "success"}                     (0.0s)
+```
+
+`/tmp/onit/data/flappy_bird.html` is a complete, well-formed document.
+
+### The guard changes the next step, not just the words
+
+Feeding a truncated call back to the model with each error text, for a body too
+large for even the new cap (90 KB):
+
+| Error text fed back | What the model did next |
+|---|---|
+| old: `Missing required argument(s): path.` | blind retry, same call, 15752 chars |
+| new: the truncation hint | **no retry** — "I cannot write a file of that size in a single call because it exceeds the system's output limits…" |
+
+That is the point of the second layer: it turns a loop into a different
+outcome, including an honest refusal.
+
+### The log hid this, so the log now says more
+
+`tool_call` recorded `args=_short(args)`, capped at 600 chars. Every one of
+those flappy calls therefore read **`argslen=602`** regardless of whether the
+model sent 1 KB or 19 KB — the evidence was flattened out of the log. A new
+`args_chars` field records the true size beside it (6015 for the 6 KB probe).
+
+### Notes
+
+- Schema reordering does **not** help: putting `path` first in the schema, and
+  marking it `required`, both left the emitted order as `content, path` — 6/6
+  trials each. The budget was the whole problem, so that is what was changed.
+- `bash` called through the handler with `**kwargs` answers *"1 validation
+  error for call: command — Unexpected keyword argument"*. That is
+  **pre-existing** (reproduced on the stashed baseline) and is a property of the
+  positional-only handler signature; it is not related to this change.
+
+`test_tool_guidance.py` is 12/12 groups, with four new ones: the budget split,
+the pathless hint (including every case it must *not* touch), the true-size
+logging, and the prompt wording. `test_tool_parity`, `test_tool_secrets`,
+`test_tool_result`, `test_results_cap`, `test_clock`, `test_guard`,
+`test_turn_context`, `test_eventbus`, `test_muted_turn` and
+`test_ctrl_enter_interrupt` all still pass.

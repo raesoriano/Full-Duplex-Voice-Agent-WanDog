@@ -460,6 +460,36 @@ class ClockedLLMService(OpenAILLMService):
         self._refresh_clock()
         return await super().get_chat_completions(context)
 
+    def build_chat_completion_params(self, params_from_context):
+        """Give a tool-calling turn room for the tool's arguments.
+
+        ``LLM_MAX_TOKENS`` is a speech budget -- one or two sentences. A turn
+        that calls ``write_file`` spends that same budget on the *file*, and the
+        file is not speech. At 300 tokens the stream is cut inside the
+        ``content`` argument before ``path`` is ever emitted, so the tool
+        correctly reports "Missing required argument(s): path." and the agent
+        retries forever, apologising for forgetting an argument it was never
+        allowed to send. See ``config.LLM_TOOL_MAX_TOKENS`` for the measurement.
+
+        The cap is raised only when the request actually carries tools, so a
+        plain spoken turn keeps the speech ceiling and its latency. This is a
+        ceiling and not a target: the model still stops when it is done, which
+        is why the spoken answer is the same length at either cap.
+        """
+        params = super().build_chat_completion_params(params_from_context)
+        tools = (params_from_context or {}).get("tools")
+        if not tools or config.LLM_TOOL_MAX_TOKENS <= config.LLM_MAX_TOKENS:
+            return params
+        # `max_completion_tokens` is the modern spelling and takes precedence
+        # where a provider honours it; pipecat sends BOTH keys, so both have to
+        # move or the smaller one silently wins.
+        for key in ("max_tokens", "max_completion_tokens"):
+            # Only raise a cap pipecat actually set. Its NOT_GIVEN sentinel is
+            # not an int, and is left alone so the provider's own default holds.
+            if isinstance(params.get(key), int):
+                params[key] = config.LLM_TOOL_MAX_TOKENS
+        return params
+
     def _refresh_clock(self) -> None:
         """Replace the clock sentence in the system instruction with a fresh one."""
         current = self._settings.system_instruction

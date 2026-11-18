@@ -249,6 +249,23 @@ def _result_to_text(result: Any) -> str:
     return text or "(no output)"
 
 
+def _args_chars(value: Any) -> int:
+    """The real size of a tool's arguments, in characters.
+
+    ``_short`` caps the ``args`` field at 600 chars for the dashboard, which
+    made every large call look identical in the log: the flappy bird write_file
+    calls all read ``argslen=602`` no matter whether the model sent 1 KB or
+    19 KB. That cap hid the very evidence needed to see a truncated reply, so
+    the true size is recorded alongside it.
+    """
+    if isinstance(value, str):
+        return len(value)
+    try:
+        return len(json.dumps(value, ensure_ascii=False, default=str))
+    except Exception:  # noqa: BLE001
+        return len(str(value))
+
+
 def _short(value: Any, limit: int = 600) -> str:
     """Render a tool arg/result for the dashboard, capped so one huge file
     read cannot bloat the event log."""
@@ -355,6 +372,44 @@ def _shape_search_args(args: dict) -> dict:
     # under a private key so it never reaches the server's signature.
     shaped["_news_wanted"] = wanted
     return shaped
+
+
+def _missing_path_hint(name: str, args: dict) -> Optional[str]:
+    """Explain a `write_file`/`edit_file` call that arrived without ``path``.
+
+    Returns a replacement error string, or None to let the call proceed.
+
+    The symptom this exists for: the model emits
+    ``{"content": "<a whole HTML file>", "path": "..."}`` -- body first, path
+    last -- and a cap that cuts the stream inside ``content`` closes the JSON
+    before ``path`` is emitted. The tool then answers "Missing required
+    argument(s): path.", which is literally true and actively misleading: the
+    model never forgot the path, it ran out of tokens. Left alone, the model
+    reads that as its own mistake, retries the same call, and gets the same
+    answer -- 11 consecutive attempts and 24 of 26 calls in the event log of
+    18 Nov 2026, with the agent apologising that it "keeps forgetting to
+    include the file path".
+
+    The cap itself is fixed at the source (``config.LLM_TOOL_MAX_TOKENS``).
+    This is the second layer: if a call still arrives pathless, say WHY, so the
+    model's next attempt is different instead of identical.
+    """
+    if name not in ("write_file", "edit_file"):
+        return None
+    if not isinstance(args, dict) or args.get("path"):
+        return None
+    body = args.get("content") if name == "write_file" else args.get("new_string")
+    if not isinstance(body, str) or not body:
+        return None
+    return (
+        f"[tool error] {name}: no `path` argument, but {len(body)} characters "
+        "of body were sent. This is almost always the reply being cut off by "
+        "the token limit mid-body, not a forgotten argument -- the path is "
+        "emitted after the body and never arrived. Retrying the same call "
+        "unchanged will fail the same way. Either write a smaller file, or "
+        "write it in parts: a first call with mode=\"write\", then further "
+        "calls with mode=\"append\". Always pass `path`."
+    )
 
 
 def _shape_github_args(args: dict) -> dict:
@@ -1128,7 +1183,8 @@ class Guard:
         # Record the call so the dashboard can show what the agent is doing.
         if self.bus is not None:
             await self.bus.emit("tool_call", tool=tool_name,
-                                args=_short(args), server=server.name)
+                                args=_short(args), server=server.name,
+                                args_chars=_args_chars(args))
 
         result = await call(tool_name, args)
         payload = self._parse_approval(result)
@@ -1347,6 +1403,28 @@ class ToolBridgeProcessor(FrameProcessor):
             # sends a bare name for all four, and every delete then 404s.
             if name == "github_repo":
                 call_args = _shape_github_args(call_args)
+            # A pathless write_file is a truncated reply, not a forgotten
+            # argument. Answer with the real cause so the retry differs.
+            path_hint = _missing_path_hint(name, call_args)
+            if path_hint is not None:
+                if self.guard.bus is not None:
+                    # Mirror guard.handle's two events, including the
+                    # tool_call it would have emitted -- otherwise the
+                    # dashboard shows a result with no call above it.
+                    await self.guard.bus.emit("tool_call", tool=name,
+                                              args=_short(call_args),
+                                              server=server.name,
+                                              args_chars=_args_chars(call_args))
+                    await self.guard.bus.emit("tool_result", tool=name,
+                                              result=_short(path_hint))
+                    await self.guard.bus.emit(
+                        "tool_turn", tool=name,
+                        ms=int((time.monotonic() - started) * 1000),
+                        result_chars=len(path_hint), model_chars=len(path_hint),
+                        truncated=False,
+                    )
+                await params.result_callback(path_hint)
+                return
             try:
                 # One deadline for the whole call, retries included. Wrapping
                 # only the individual attempt would let a 3-attempt search hold

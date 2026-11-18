@@ -235,6 +235,39 @@ LLM_BASE_URL = os.environ.get("ONIT_LLM_BASE_URL", "https://ollama.com/v1")
 LLM_MODEL = os.environ.get("ONIT_LLM_MODEL", "gemma4:31b-cloud")
 LLM_TEMPERATURE = float(os.environ.get("ONIT_LLM_TEMPERATURE", 0.7))
 LLM_MAX_TOKENS = int(os.environ.get("ONIT_LLM_MAX_TOKENS", 300))
+
+# ---------------------------------------------------------------------------
+# The cap for a turn that calls a tool, which is NOT the cap for speech.
+# ---------------------------------------------------------------------------
+# LLM_MAX_TOKENS above is a SPEECH budget: one or two sentences, ~40 tokens.
+# Applying it to a turn that emits a tool call is a category error, because the
+# tool's arguments come out of the same budget and are not speech.
+#
+# Measured 18 Nov 2026 (gemma4:31b-cloud, the real 14-tool schemas). Asking for
+# a flappy bird clone, the model emits its arguments in the order
+#
+#     {"content": "<the entire 5 KB HTML file>", "path": "flappy_bird.html"}
+#
+# -- the file body first, the path LAST. At 300 tokens the stream is cut inside
+# `content`, so the JSON is closed by the server without ever reaching `path`:
+#
+#     max_tokens= 300  finish=length     arglen~1127  keys=['content']
+#     max_tokens= 600  finish=length     arglen~2030  keys=['content']
+#     max_tokens=1000  finish=length     arglen~3900  keys=['content']
+#     max_tokens=4096  finish=tool_calls arglen~5840  keys=['content','path']
+#
+# The tool then answers "Missing required argument(s): path." -- which is true,
+# and completely misleading: nothing was missing from the model's intent, the
+# argument was simply past 300 tokens. In /tmp/wandog_events.jsonl that is 24
+# of 26 write_file calls, every one of them that same error, including a run of
+# 11 consecutive attempts and the agent apologising that it "keeps forgetting to
+# include the file path". It never forgot; it was never allowed to finish.
+#
+# 8192 covers a ~20 KB file (measured: 16.6-19.5 KB arguments, finish=tool_calls,
+# path present, 3 of 3). It costs no extra latency on speech: the cap is a
+# ceiling, not a target, and "What is the capital of France?" measured 31 chars
+# and 0.6 s at both 300 and 8192.
+LLM_TOOL_MAX_TOKENS = int(os.environ.get("ONIT_LLM_TOOL_MAX_TOKENS", 8192))
 # Qwen3.8 is a thinking model: by default it spends its token budget on
 # internal reasoning and returns an empty `content` (the reasoning arrives in
 # a separate field), which would make the voice agent say nothing. vLLM
@@ -669,7 +702,24 @@ TOOLS_SYSTEM_PROMPT = (
     "as partial when the note says so, and never describe a shortened list as "
     "everything that exists. If you need more than you were shown, ask the "
     "tool again for fewer results or a narrower query rather than repeating "
-    "the same call."
+    "the same call. "
+    # Writing a file. The model emits tool arguments in the order it likes, and
+    # for write_file it puts the whole body first and `path` LAST. A reply cut
+    # off by the token limit therefore loses exactly the one argument the tool
+    # cannot work without, and the tool's own error ("Missing required
+    # argument(s): path.") reads as a mistake the model made rather than a
+    # truncated reply. Measured 18 Nov 2026: 24 of 26 write_file calls failed
+    # that way, 11 of them in a row, with the agent apologising that it "keeps
+    # forgetting to include the file path".
+    #
+    # The cap is now large enough (config.LLM_TOOL_MAX_TOKENS) and the bridge
+    # explains a pathless call, but the model can also avoid the situation:
+    # name the file first, and build a long file in parts instead of one
+    # enormous argument.
+    "When you write a file, always pass `path`, and put it in the call before "
+    "the content. A very long file may not fit in one reply: if a write is cut "
+    "off, do not repeat the same call -- write the first part with "
+    "mode=\"write\", then add the rest with further calls using mode=\"append\"."
 )
 
 
