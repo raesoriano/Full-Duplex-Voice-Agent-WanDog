@@ -1317,3 +1317,84 @@ prompt rule cannot be relied on to win, and the reason the shim exists.
 
 `test_tool_guidance.py` grew two groups (7/7 now): the shaping table, including
 the cases it must not touch, and the 404 wording.
+
+## 19. "I have no tool for that" was false, and `gh` was never installed
+
+Asked to enable GitHub Pages, the agent said:
+
+> I'm sorry, but I don't have a tool that can change the internal settings of a
+> GitHub repository, like enabling GitHub Pages. You will need to go to the
+> Settings tab of your repository...
+
+Asked whether it was sure, it said **"I am sure."** The event log
+(`/tmp/wandog_events.jsonl`, idx 2038 and 2050) has both, and only afterwards
+does it call `github_repo action=get`.
+
+The diagnosis was right. `jeolee.github.io` was public, its default branch was
+`main`, `index.html` (693 B) was committed — and `has_pages` was `false`, so the
+404 the person kept hitting was real. What was wrong was the claim of inability.
+
+### It is not true: `curl` is allowlisted and the token is in bash
+
+`github_repo` really does have five actions (create, get, list, fork, delete).
+But the bash tool is a separate door, and the REST API behind it works:
+
+| Check, through the real spawned MCP bash server | Result |
+|---|---|
+| `GITHUB_TOKEN` in the bash environment | present, 93 chars |
+| `GH_TOKEN` | present |
+| `curl` private repo, with the token | **200** |
+| same `curl`, without the token | 404 — so the 200 was the token |
+| `POST /repos/…/pages` on a **private** repo | **422** plan does not support |
+| `POST /repos/…/pages` on a **public** repo | **201** with `html_url` |
+
+The last two matter together. A 422 is the plan refusing a private repo; it is
+proof the authenticated write reached the endpoint, and it is not a missing
+tool. On a public repo the same call returns 201.
+
+So the fix is a prompt paragraph that draws the narrow line the model was
+missing: *"this one tool lacks an action"* is not *"I have no way to do this"*.
+A missing action means reach for the REST API — and say so after the call, not
+instead of it.
+
+Measured on the live model with the real 14-tool schemas, two trials each:
+
+| Question | Before | After |
+|---|---|---|
+| "Can you enable GitHub Pages on raesoriano/jeolee.github.io?" | "I cannot directly enable GitHub Pages through the API" ×2, no call | confirms, then `bash curl -X POST …/pages` ×2 |
+| "…now, I confirm." | `gh repo edit --enable-pages` ×2 | `bash curl -X POST …/pages` ×2 |
+| "Do you have a way to change a repo's settings, like visibility?" | "No, I do not have a tool that can change a repository's settings" ×2 | "Yes … via `curl` in the bash tool" ×2 |
+
+Then the emitted command was run through the real bash tool against the real
+repository, and it worked:
+
+```
+POST https://api.github.com/repos/raesoriano/jeolee.github.io/pages
+     {"source":{"branch":"main","path":"/"}}      -> 201
+pages status: building -> built
+https://raesoriano.github.io/jeolee.github.io/  -> 200, 693 B, the Jeolee page
+```
+
+The person's site is live. That is the point: it was one `curl` away the whole
+time.
+
+### The `gh` bug underneath
+
+The prompt said GitHub access came "through `git` and `gh` in bash". **`gh` is
+not installed on this host** — `gh: not found`, exit 127, in the event log at
+idx 583 (`gh repo rename …`) and again at 1627 (`gh repo clone …`). That line
+sent the model to a command that can only fail, and the before-column above
+shows it reaching for `gh repo edit --enable-pages` — a flag that does not
+exist anyway. The prompt now names `git` and `curl` and drops `gh`.
+
+### One thing to know about this account
+
+GitHub Pages on a free plan is **public repositories only**. `POST /pages` on a
+private repo answers 422 *"Your current plan does not support GitHub Pages for
+this repository."* The prompt says so, so a 422 is reported as a private-repo
+fact rather than as a missing tool.
+
+`test_tool_guidance.py` group 8 pins the wording, including a check that the
+prompt does not advertise `gh`. 8/8 groups pass. Probe repositories
+(`wandog-pages-probe`, `-2`, `-3`) were created and deleted during measurement;
+the account is back to its 22.

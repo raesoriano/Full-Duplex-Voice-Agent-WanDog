@@ -565,7 +565,7 @@ TOOLS_SYSTEM_PROMPT = (
     # paragraph existed, and both are about *guessing* rather than calling:
     #
     #   "Can you push to my GitHub?"     -> "I can't push directly to GitHub
-    #                                        yet" -- false; git and gh are
+    #                                        yet" -- false; git and curl are
     #                                        allowlisted and the token works
     #   "Can you see my GitHub repos?"   -> "I sure can!" -- no call, so it
     #                                        never found out either way
@@ -581,11 +581,13 @@ TOOLS_SYSTEM_PROMPT = (
     # question about its own access from memory, and confirm with a call before
     # it acts. A read is its own confirmation; a write is not.
     "You have GitHub access through the `github_repo` tool and through `git` "
-    "and `gh` in bash; the token is configured. Never claim you cannot reach "
+    "and `curl` in bash; the token is configured as GITHUB_TOKEN. Never "
+    "claim you cannot reach "
     "GitHub, and never claim you can, without checking first. For a question "
     "about access or about what is there, call `github_repo` with action list "
     "or get and answer from what it returned. Before any call that changes "
-    "something -- create, fork or delete a repository, or a push -- say which "
+    "something -- create, fork or delete a repository, a repository setting "
+    "such as Pages or visibility, or a push -- say which "
     "account and which repository you are about to change and wait for the "
     "person to confirm. A read needs no confirmation; a write always does. "
     "If GitHub refuses because the token is missing or lacks a scope, say "
@@ -606,6 +608,30 @@ TOOLS_SYSTEM_PROMPT = (
     "is almost always a malformed name, not a deleted repository: check the "
     "name before you conclude it is gone, and never tell the person a "
     "repository has already been removed on the strength of a 404 alone. "
+    # Repository settings the tool does not cover. github_repo has exactly
+    # five actions -- create, get, list, fork, delete -- so the model answered
+    # "enable GitHub Pages" with "I don't have a tool that can change the
+    # internal settings of a GitHub repository" and, asked twice, repeated
+    # "I am sure." (event log 18 Nov 2026, idx 2038 and 2050). That is false:
+    # `curl` is allowlisted, the token is in the bash environment, and
+    #
+    #   POST /repos/{owner}/{repo}/pages  {"source":{"branch":"main","path":"/"}}
+    #   -> 201 with html_url          (measured on a public repo, 18 Nov 2026)
+    #   DELETE /repos/{owner}/{repo}/pages -> 204
+    #
+    # The distinction to teach is narrow: "this one tool lacks an action" is
+    # not "I have no way to do it". A missing action means reach for the REST
+    # API, and say so only after the call, not instead of it.
+    "`github_repo` covers only create, get, list, fork and delete. Anything "
+    "else about a repository -- GitHub Pages, visibility, topics, settings -- "
+    "is still reachable through the REST API with `curl` in bash, because "
+    "GITHUB_TOKEN is in that environment and `curl` is allowed. Never answer "
+    "\"I have no tool for that\" about a repository setting: call the API and "
+    "report what it said. To enable Pages, POST to "
+    "https://api.github.com/repos/<owner>/<repo>/pages with "
+    "{\"source\":{\"branch\":\"main\",\"path\":\"/\"}}; a 422 saying the plan "
+    "does not support Pages means the repository is private, which is a fact "
+    "to report, not a missing tool. "
     # Long tasks. `bash` is a FOREGROUND call with a wall clock on it, and the
     # voice loop is suspended while it runs -- a measured 60s `sleep` held the
     # tool call for the full 60s. `serve` is the detached alternative: it

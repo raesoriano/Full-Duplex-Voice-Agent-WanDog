@@ -216,6 +216,35 @@ def test_github_404_guidance() -> bool:
     return ok
 
 
+def test_repo_settings_guidance() -> bool:
+    """The Pages answer: "I have no tool for that" was false.
+
+    github_repo has five actions and no Pages action, so the model said it had
+    no way to change a repository setting and, asked to double-check, repeated
+    "I am sure" (event log 18 Nov 2026, idx 2038 / 2050). `curl` is allowlisted
+    and GITHUB_TOKEN is in the bash environment, so the REST call works -- a
+    POST to /repos/{owner}/{repo}/pages returned 201 with an html_url.
+    """
+    print("\n8. the prompt does not confuse a missing action with a missing tool")
+    p = config.TOOLS_SYSTEM_PROMPT
+    ok = check("it lists the five actions github_repo really has",
+               "create, get, list, fork and delete" in p)
+    ok &= check("it names Pages as still reachable", "GitHub Pages" in p)
+    ok &= check("it says curl carries the token", "`curl` in bash" in p)
+    ok &= check("it forbids 'I have no tool for that'",
+                'Never answer "I have no tool for that"' in p)
+    ok &= check("it gives the Pages call", "/pages" in p
+                and '"source":{"branch":"main","path":"/"}' in p)
+    ok &= check("it reads the 422 as a private repo, not a missing tool",
+                "does not support Pages means the repository is private" in p)
+    # The prompt must not advertise a binary that is not installed: `gh` is
+    # absent on this host (`gh: not found`, exit 127 in the event log), so
+    # naming it sends the model to a command that can only fail.
+    ok &= check("it does not advertise the missing gh binary",
+                "and `gh`" not in p and "`gh` in bash" not in p)
+    return ok
+
+
 def main() -> int:
     results = [
         test_github_instruction(),
@@ -225,6 +254,7 @@ def main() -> int:
         test_guard_and_clock_agree(),
         test_github_name_is_qualified(),
         test_github_404_guidance(),
+        test_repo_settings_guidance(),
     ]
     print("\n--- summary ---")
     print(f"  {sum(results)}/{len(results)} groups passed")
