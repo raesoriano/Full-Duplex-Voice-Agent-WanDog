@@ -366,8 +366,15 @@ def test_prompt_has_date() -> bool:
     prompt = config.tools_system_prompt()
     today = date.today().strftime("%d %B %Y")
     ok = check(f"prompt contains {today!r}", today in prompt)
-    ok &= check("prompt asks for type=news on recency",
-                "type" in prompt and "news" in prompt)
+    # The prompt no longer tells the model to pass type=news: it did so on 0 of
+    # 13 real searches, so _shape_search_args now supplies the argument and
+    # _sort_news orders the payload. What the prompt still owes is the half no
+    # code can do -- saying the date out loud, and not overclaiming.
+    ok &= check("prompt asks for the date to be spoken",
+                "say the date of the result" in prompt)
+    ok &= check("the code, not the prompt, sets type=news",
+                config.MCP_NEWS_AUTODETECT
+                and "type set to news" not in prompt)
     ok &= check("prompt warns against calling stale results current",
                 "older than the question" in prompt or "Never call" in prompt)
     ok &= check("TOOLS_SYSTEM_PROMPT itself is unchanged and date-free",

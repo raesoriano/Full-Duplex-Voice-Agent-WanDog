@@ -327,26 +327,34 @@ MCP_APPROVAL_TIMEOUT = float(os.environ.get("WANDOG_MCP_APPROVAL_TIMEOUT", 120))
 # 1.6 broken results -- the model got a title and a dangling fragment, and
 # could not see the `date` field it needed to tell old news from new.
 #
-# WHY 24000 AND NOT 1200. The old 1200 was chosen for a voice reply of one or
-# two sentences, before anything was measured. Measured on 17 Nov 2026, every
-# shape the tools actually return was being truncated at 1200, and two of them
-# lost the answer rather than just the bulk:
+# WHY 8000 AND NOT 1200 OR 24000. The old 1200 was chosen for a voice reply of
+# one or two sentences, before anything was measured, and it cut every shape the
+# tools actually return. 24000 then went too far the other way: it was the
+# smallest round number at which no observed payload was cut at all, which is a
+# reasonable goal for a guard that should never decide the answer, but it is
+# four times the largest payload the tools have ever produced (22,970 chars,
+# and that is an outlier -- the next largest was 12,094).
 #
-#   ddgs news, sorted to 5 results   2,073 ch   1200 -> 2 of 5   24000 -> 5/5
-#   Tavily news, 5 results           6,694 ch   1200 -> 2 of 5   24000 -> 5/5
-#   web search, 5 full page bodies   7,432 ch   1200 -> 2 of 5   24000 -> 5/5
-#   ollama web, 5 results           22,970 ch   1200 -> 2 of 5   24000 -> 5/5
-#   read_file                       12,094 ch   1200 -> clipped  24000 -> whole
+# Measured on 17 Nov 2026, every shape the tools return:
 #
-# 24000 is the smallest round number at which *no observed payload* is cut at
-# all, so the cap goes back to being what it was meant to be -- a guard against
-# a pathological result, not the thing that decides the answer. The headroom is
-# real, not assumed: the endpoint accepts 1,000,000 chars (172,443 prompt
-# tokens) and only refuses at 2,000,000 ("exceeded max context length by
-# 82,713 tokens"), i.e. a ceiling near 1.5M chars. A heavy session in the event
-# log was 13 tool calls / 60,583 raw chars; at 24000 each that is 312,000 chars,
-# about a fifth of the ceiling. Latency is not a factor either: 120k chars
-# answered in 2.5s, 600k in 4.6s.
+#   ddgs news, sorted to 5 results   2,073 ch   1200 -> 2 of 5
+#   Tavily news, 5 results           6,694 ch   1200 -> 2 of 5
+#   web search, 5 full page bodies   7,432 ch   1200 -> 2 of 5
+#   ollama web, 5 results           22,970 ch   1200 -> 2 of 5
+#   read_file                       12,094 ch   1200 -> clipped
+#
+# Against the 21 `tool_turn` events in the event log the largest result was
+# 6,280 chars, so 8000 leaves headroom for every one of them; the two payloads
+# above 8000 are the outliers, and both now degrade rather than collapse
+# because _CAP_CLIP_LADDER gained 4000/3000/2000 rungs. Before those rungs,
+# lowering this number was strictly a loss: a 12,094-char read came back as 701
+# chars at 8000, which is what made 24000 look necessary. It was not the number
+# that was wrong, it was the gap between "whole" and 700.
+#
+# Latency is not a factor: 120k chars answered in 2.5s, 600k in 4.6s, and the
+# endpoint's ceiling is near 1.5M chars. This cap is about keeping the context
+# small enough that a long conversation stays inside that ceiling, not about
+# what any single result can cost.
 #
 # The cap stays HARD rather than becoming a prompt suggestion. A prompt can ask
 # the model to be brief, but the model does not choose the size of a tool
@@ -357,7 +365,7 @@ MCP_APPROVAL_TIMEOUT = float(os.environ.get("WANDOG_MCP_APPROVAL_TIMEOUT", 120))
 # number enforces it.
 #
 # 0 disables the cap (the old behaviour).
-MCP_MODEL_RESULT_CHARS = int(os.environ.get("WANDOG_MCP_MODEL_RESULT_CHARS", 24000))
+MCP_MODEL_RESULT_CHARS = int(os.environ.get("WANDOG_MCP_MODEL_RESULT_CHARS", 8000))
 
 # Search retries. OnIt's news branch calls ddgs once and turns any exception
 # into {"error": "Search failed: No results found."} -- ddgs RAISES rather than
@@ -573,24 +581,25 @@ TOOLS_SYSTEM_PROMPT = (
     "then wait for the tool to finish -- do not retry it, do not rephrase it, "
     "and do not try another route around it. If the person declines, say so "
     "and move on. "
-    # Recency guidance. This is the half of the fix that lives in the prompt;
-    # the other half is config.MCP_NEWS_AUTODETECT, which sets the argument
-    # when the model forgets it. Both were missing, and the event log shows
-    # the model never passed `type` on its own in 13 out of 13 calls.
-    "For anything about news, current events, prices, scores, or 'the latest' "
-    "or 'who won', search with type set to news so the results carry dates. "
-    "Prefer the most recent result and mention its date when you speak. If a "
-    "result looks older than the question asks for, say so instead of "
-    "presenting it as current. Never call a result 'the latest' unless its "
-    "date supports that. "
+    # Recency. The *search* half is no longer stated here. The model passed no
+    # `type` on 13 out of 13 real searches, so config.MCP_NEWS_AUTODETECT and
+    # mcp_bridge._shape_search_args now supply the argument, and _sort_news
+    # orders the payload newest-first -- neither of which the prompt was ever
+    # able to achieve. What is left is the half no code can do: saying the
+    # date out loud, and not overclaiming when the date does not support it.
+    "For news, prices or scores, say the date of the result you quote. "
+    "Never call a result 'the latest' unless its date supports that. "
     # Clock guidance. The date line in ``clock_line()`` is what broke the
     # clock: it says "Today is Tuesday, 17 November 2026", and a model holding
     # a date with no time will happily invent one -- measured at 3 out of 3
     # trials on "What is the time?", answering 11:44 AM, 1:15 PM, 11:38 AM in
     # three consecutive calls, never touching the bash tool it had been using
-    # for the same question before the date line existed. The line below is
-    # what stops the invention; ``clock_line()`` supplies the real value.
-    "Never state a clock time you have not been given or read from a tool. "
+    # for the same question before the date line existed. The guard itself
+    # (``CLOCK_GUARD``) is prepended by agent.py for both bridge-on and
+    # bridge-off builds, so it is NOT repeated here: the assembled prompt used
+    # to carry it twice, once from that prepend and once from this block.
+    # What is left here is the recipe the guard implies -- how to read a
+    # foreign zone -- which only applies when there are tools to run.
     "For a time in another city or timezone, run `date` with the bash tool "
     "and a TZ prefix -- for example TZ=\"America/Anchorage\" date -- and read "
     "the time from its output. "
@@ -613,18 +622,13 @@ TOOLS_SYSTEM_PROMPT = (
     # The rule is therefore the same shape as the clock rule: never answer a
     # question about its own access from memory, and confirm with a call before
     # it acts. A read is its own confirmation; a write is not.
-    "You have GitHub access through the `github_repo` tool and through `git` "
-    "and `curl` in bash; the token is configured as GITHUB_TOKEN. Never "
-    "claim you cannot reach "
-    "GitHub, and never claim you can, without checking first. For a question "
-    "about access or about what is there, call `github_repo` with action list "
-    "or get and answer from what it returned. Before any call that changes "
-    "something -- create, fork or delete a repository, a repository setting "
-    "such as Pages or visibility, or a push -- say which "
-    "account and which repository you are about to change and wait for the "
-    "person to confirm. A read needs no confirmation; a write always does. "
-    "If GitHub refuses because the token is missing or lacks a scope, say "
-    "exactly that; do not describe a missing permission as not having access. "
+    "You have GitHub access through `github_repo` and through `git` and "
+    "`curl` in bash; the token is set as GITHUB_TOKEN. Never say you cannot "
+    "reach GitHub, or that you can, without calling first; a read is its own "
+    "confirmation, a write is not. Before a write -- create, fork, delete, a "
+    "repository setting, a push -- name the account and repository and wait "
+    "for a yes. If GitHub refuses for a missing token or scope, say exactly "
+    "that, not 'no access'. "
     # The name shape. github_repo takes a BARE name to create but owner/repo
     # to get, fork and delete, and the model sent a bare name for all four.
     # The server pastes `name` into /repos/{name}, so a bare name 404s -- and
@@ -634,13 +638,13 @@ TOOLS_SYSTEM_PROMPT = (
     # the person was told four times that they "might have already been
     # removed". mcp_bridge._shape_github_args now qualifies the name, so the
     # call works whether or not the model remembers; this line is what makes
-    # the model's own reasoning and its report to the person correct.
-    "In `github_repo`, `name` is a bare name only for create; for get, fork "
-    "and delete it must be owner/repo -- for you that means "
-    f"{OWNER_GITHUB}/<name>. A 404 on a repository your own list just showed "
-    "is almost always a malformed name, not a deleted repository: check the "
-    "name before you conclude it is gone, and never tell the person a "
-    "repository has already been removed on the strength of a 404 alone. "
+    # the model's own reasoning and its report to the person correct. It is
+    # merged into the 404 rule because that is the only reason it exists --
+    # as a standalone sentence it was the shape of rule that gets skimmed.
+    f"For get, fork and delete, `name` must be {OWNER_GITHUB}/<name>; only "
+    "create takes a bare one. A 404 on a repository your own list just showed "
+    "is almost always a malformed name, not a deleted repository: never say "
+    "one has been removed on the strength of a 404 alone. "
     # Repository settings the tool does not cover. github_repo has exactly
     # five actions -- create, get, list, fork, delete -- so the model answered
     # "enable GitHub Pages" with "I don't have a tool that can change the
@@ -655,16 +659,15 @@ TOOLS_SYSTEM_PROMPT = (
     # The distinction to teach is narrow: "this one tool lacks an action" is
     # not "I have no way to do it". A missing action means reach for the REST
     # API, and say so only after the call, not instead of it.
-    "`github_repo` covers only create, get, list, fork and delete. Anything "
-    "else about a repository -- GitHub Pages, visibility, topics, settings -- "
-    "is still reachable through the REST API with `curl` in bash, because "
-    "GITHUB_TOKEN is in that environment and `curl` is allowed. Never answer "
-    "\"I have no tool for that\" about a repository setting: call the API and "
-    "report what it said. To enable Pages, POST to "
-    "https://api.github.com/repos/<owner>/<repo>/pages with "
-    "{\"source\":{\"branch\":\"main\",\"path\":\"/\"}}; a 422 saying the plan "
-    "does not support Pages means the repository is private, which is a fact "
-    "to report, not a missing tool. "
+    "`github_repo` covers only create, get, list, fork and delete; GitHub "
+    "Pages, visibility, topics and settings still go through the REST API with "
+    "`curl` in bash, which carries GITHUB_TOKEN. Never answer \"I have no tool "
+    "for that\" about a repository setting -- call the API and report what it "
+    "said. Enable Pages with POST "
+    "https://api.github.com/repos/<owner>/<repo>/pages and "
+    "{\"source\":{\"branch\":\"main\",\"path\":\"/\"}}; a 422 that the plan "
+    "does not support Pages means the repository is private -- report that, it "
+    "is not a missing tool. "
     # Long tasks. `bash` is a FOREGROUND call with a wall clock on it, and the
     # voice loop is suspended while it runs -- a measured 60s `sleep` held the
     # tool call for the full 60s. `serve` is the detached alternative: it
@@ -695,8 +698,8 @@ TOOLS_SYSTEM_PROMPT = (
     # `note` field ("showing 3 of 5 results"), and without this line the model
     # reads the note as part of the answer -- or worse, does not read it and
     # reports the three it can see as everything the search found. Asking for
-    # fewer results is a real lever: a 5-result news payload fits whole at
-    # 24000 chars, and asking for 20 of them does not.
+    # fewer results is a real lever: a 5-result news payload fits whole, and
+    # asking for 20 of them does not.
     "A tool result may be shortened to fit your context; when it is, a note "
     "field says how much was shown and how much was cut. Treat what you got "
     "as partial when the note says so, and never describe a shortened list as "

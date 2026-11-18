@@ -106,12 +106,22 @@ def test_prompt_has_a_clock() -> bool:
 def test_prompt_forbids_inventing() -> bool:
     print("\n2. the prompt forbids a clock time it was not given")
     prompt = config.TOOLS_SYSTEM_PROMPT
+    # The guard now lives only in CLOCK_GUARD, which agent.py prepends; the
+    # tools block used to repeat it. Assert the assembled prompt, since that is
+    # what the model is actually handed.
+    assembled = (config.SYSTEM_PROMPT + " " + config.OWNER_PROMPT + " "
+                 + config.clock_line() + " " + config.CLOCK_GUARD + " " + prompt)
     ok = check("it forbids stating an unread clock time",
-               "Never state a clock time" in prompt)
+               "Never state a clock time" in assembled)
     ok &= check("it names the escape hatch for other timezones",
                 "TZ=" in prompt and "bash" in prompt)
-    ok &= check("it still tells the model to use news for recency",
-                "type set to news" in prompt)
+    # News recency is supplied by _shape_search_args now, so the prompt no
+    # longer carries the instruction. What it must still carry is the date.
+    ok &= check("the news guidance moved into code, not the prompt",
+                "type set to news" not in prompt
+                and config.MCP_NEWS_AUTODETECT)
+    ok &= check("the prompt still asks for the date to be spoken",
+                "say the date of the result" in prompt)
     return ok
 
 
@@ -158,7 +168,12 @@ def test_refresh_is_idempotent() -> bool:
     ok &= check("the prompt did not grow", len(after) == length,
                 f"{length} -> {len(after)}")
     ok &= check("the persona is still first", after.startswith(config.SYSTEM_PROMPT))
-    ok &= check("the news guidance survived", "type set to news" in after)
+    # The point of this check is that the refresh rewrites the clock without
+    # disturbing the rest of the prompt. It used to spot-check the news
+    # sentence; that sentence has moved into code, so anchor on one that is
+    # still there.
+    ok &= check("the tools guidance survived",
+                "say the date of the result" in after)
     return ok
 
 

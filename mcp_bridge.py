@@ -774,7 +774,15 @@ _CAP_KEEP_INTACT = frozenset({
 # How much prose to keep per result, tried in order. ``None`` means "try whole
 # results first", so a payload that already fits is passed through untouched:
 # news results are short and must not be abbreviated needlessly.
-_CAP_CLIP_LADDER = (None, 700, 500, 350, 250, 180, 120, 80, 50)
+#
+# The rungs above 700 exist because the ladder does not bisect. It walks down
+# and takes the first clip that fits, so a payload one char over the cap fell
+# all the way to 700: measured, a 12,094-char ``read_file`` came back as 701
+# chars of content at both 24,000 and 8,000, losing the document it had just
+# asked for. The gap between "whole" and 700 was the entire failure. 4000/
+# 3000/2000 make an oversized result degrade instead of collapse -- at an
+# 8,000 cap a 12,094-char file now keeps 4,000 chars per record, not 700.
+_CAP_CLIP_LADDER = (None, 4000, 3000, 2000, 700, 500, 350, 250, 180, 120, 80, 50)
 
 # Words too common to identify the passage that answers a question.
 _CAP_STOPWORDS = frozenset(
