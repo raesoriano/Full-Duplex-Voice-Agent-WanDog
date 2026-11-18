@@ -291,7 +291,10 @@ check("the attach key is kept for the layout test", "attachph" in dash)
 check("the uploader is present", "st.file_uploader" in dash)
 check("the uploader is limited to the allowed types",
       "UPLOAD_EXTENSIONS" in dash)
-check("the dashboard stores into the session", "session.store_upload" in dash)
+# The dashboard imports session as sess: it already binds a local `session`
+# (the session_start event) further down, which would shadow the module.
+check("the dashboard imports the session module", "import session as sess" in dash)
+check("the dashboard stores into the session", "sess.store_upload" in dash)
 check("the dashboard hands the agent a notification",
       "_drop(UPLOAD_FILE" in dash)
 check("an upload is stored once", "_SEEN_UPLOADS" in dash)
