@@ -561,6 +561,59 @@ TOOLS_SYSTEM_PROMPT = (
     "For a time in another city or timezone, run `date` with the bash tool "
     "and a TZ prefix -- for example TZ=\"America/Anchorage\" date -- and read "
     "the time from its output. "
+    # GitHub. Two separate failures were measured on the live model before this
+    # paragraph existed, and both are about *guessing* rather than calling:
+    #
+    #   "Can you push to my GitHub?"     -> "I can't push directly to GitHub
+    #                                        yet" -- false; git and gh are
+    #                                        allowlisted and the token works
+    #   "Can you see my GitHub repos?"   -> "I sure can!" -- no call, so it
+    #                                        never found out either way
+    #   "Do you have my GitHub token?"   -> "I do not have access to your
+    #                                        GitHub token." -- false
+    #
+    # The token was present and working the whole time: github_repo action=list
+    # returned real repos in 1.8s. The model was inferring its own capability
+    # from the tool description, and the description says "Requires
+    # GITHUB_TOKEN", which reads as a caveat rather than as "this is set".
+    #
+    # The rule is therefore the same shape as the clock rule: never answer a
+    # question about its own access from memory, and confirm with a call before
+    # it acts. A read is its own confirmation; a write is not.
+    "You have GitHub access through the `github_repo` tool and through `git` "
+    "and `gh` in bash; the token is configured. Never claim you cannot reach "
+    "GitHub, and never claim you can, without checking first. For a question "
+    "about access or about what is there, call `github_repo` with action list "
+    "or get and answer from what it returned. Before any call that changes "
+    "something -- create, fork or delete a repository, or a push -- say which "
+    "account and which repository you are about to change and wait for the "
+    "person to confirm. A read needs no confirmation; a write always does. "
+    "If GitHub refuses because the token is missing or lacks a scope, say "
+    "exactly that; do not describe a missing permission as not having access. "
+    # Long tasks. `bash` is a FOREGROUND call with a wall clock on it, and the
+    # voice loop is suspended while it runs -- a measured 60s `sleep` held the
+    # tool call for the full 60s. `serve` is the detached alternative: it
+    # returns in about half a second with a pid and a log path, and `action
+    # logs` reads it later.
+    #
+    # Measured on the live model before this paragraph existed:
+    #   "run this command and tell me when it finishes: ./build.sh"
+    #       -> bash("./build.sh")            unbounded, could hold the turn for
+    #                                        the whole 320s tool timeout
+    #   "the test suite takes about 15 minutes"
+    #       -> serve(...)                    correct, but only because the
+    #                                        question happened to say so
+    #
+    # So the rule is stated rather than left to the word "minutes" appearing in
+    # the question: anything that may outlast a sentence goes to serve.
+    "A command that may take more than a few seconds -- a build, a test "
+    "suite, an install, a download, a script -- must go through the `serve` "
+    "tool, not `bash`. `bash` is foreground and the person hears nothing "
+    "until it returns; `serve` starts it detached and returns at once. After "
+    "starting one, tell the person it is running and that you can check on "
+    "it. Use `serve` with action logs to report progress, and action status "
+    "to see whether it finished. Do not claim a long task is done until "
+    "`serve` says it stopped. "
     # Truncation guidance. The hard cap in MCP_MODEL_RESULT_CHARS is the
     # enforcement; this is the half that lives in the prompt, and it is the
     # half the model can actually act on. A truncated payload says so in a
@@ -576,6 +629,34 @@ TOOLS_SYSTEM_PROMPT = (
     "tool again for fewer results or a narrower query rather than repeating "
     "the same call."
 )
+
+
+def _zone_name() -> str:
+    """The IANA zone name of the host, e.g. ``Asia/Manila``.
+
+    ``tzname()`` is not enough on its own. This host is on Asia/Manila, whose
+    abbreviation is **PST** -- Philippine Standard Time. The clock line used to
+    read "11:26 AM (PST, UTC+0800)", and PST is far more widely read as
+    *Pacific* Standard Time, which is UTC-0800. The line contradicted itself:
+    a reader who trusts the letters gets a 16-hour error, and a reader who
+    trusts the offset gets the right answer by ignoring the letters. Measured
+    on the live prompt, the model read the offset correctly, but the ambiguity
+    is free to remove and would bite a person reading the transcript.
+
+    Falls back to the abbreviation when /etc/localtime does not name a zone.
+    """
+    from pathlib import Path
+    try:
+        target = Path("/etc/localtime").resolve()
+        parts = target.parts
+        if "zoneinfo" in parts:
+            name = "/".join(parts[parts.index("zoneinfo") + 1:])
+            if name:
+                return name
+    except OSError:
+        pass
+    from datetime import datetime
+    return datetime.now().astimezone().tzname() or "local"
 
 
 def clock_line() -> str:
@@ -597,13 +678,16 @@ def clock_line() -> str:
     The clock is re-read on every call, so a long-running agent cannot drift.
     It is the local zone: ``datetime.now().astimezone()`` follows /etc/localtime,
     which is what a person standing in front of the mic means by "the time".
+
+    The zone is named as well as offset. See ``_zone_name`` for why: this host's
+    abbreviation is PST, which reads as Pacific, not Philippine.
     """
     from datetime import datetime
     now = datetime.now().astimezone()
     return (
         f"The current date and time here is "
         f"{now.strftime('%A, %d %B %Y, %I:%M %p')} "
-        f"({now.tzname()}, UTC{now.strftime('%z')}). "
+        f"({_zone_name()}, {now.tzname()}, UTC{now.strftime('%z')}). "
     )
 
 

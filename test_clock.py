@@ -258,8 +258,15 @@ def test_clock_format() -> bool:
     line = config.clock_line()
     ok = check("it names the weekday", bool(re.search(
         r"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)", line)))
-    ok &= check("it gives a 12-hour time", bool(re.search(r"\d{1,2}:\d{2}\s*[AP]M", line)))
-    ok &= check("it names the local zone", bool(re.search(r"\([A-Z]{2,5}, UTC[+-]\d{4}\)", line)))
+    ok &= check("it gives a 12-hour time", bool(re.search(r"\d{1,2}:\d{2}[ ]*[AP]M", line)))
+    # The zone is named, not just abbreviated. This host is on Asia/Manila,
+    # whose abbreviation is "PST" -- Philippine Standard Time, which reads as
+    # Pacific Standard Time (UTC-0800) while the offset beside it says +0800.
+    # The line contradicted itself, so the IANA name is now included.
+    ok &= check("it names the local zone", bool(re.search(
+        r"\(\w+/\w+(?:/\w+)?, [A-Z]{2,5}, UTC[+-]\d{4}\)", line)))
+    ok &= check("the abbreviation does not contradict the offset",
+                not re.search(r"\bPST\b, UTC-", line))
     ok &= check("it is a complete sentence ending in a period", line.rstrip().endswith("."))
     return ok
 

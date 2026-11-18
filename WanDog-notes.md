@@ -1139,3 +1139,107 @@ rewrites the log to force the busy state, so it backs the log up and restores it
 -- an early version without the backup overwrote a real session. Both control
 files are consumed by the agent within a poll, so the test asserts on the log,
 not on the file: the click was working all along and the file was already gone.
+
+## 17. Time, GitHub and long tasks: the tools were fine, the prompt was not
+
+Reported as three tool failures. Only one of them is a tool failure, and it is
+the one nobody reported: the clock line contradicted itself.
+
+### Time
+
+"How do you tell time as OnIt?" -- OnIt does not carry a clock in its prompt at
+all. Its Context block gives only `Today's date: {current_date}`
+(`src/mcp/prompts/prompts.py:117,159`), and it answers a time question by
+running `date` through bash. `date` and `cal` are in OnIt's
+`DEFAULT_ALLOWED_COMMANDS` (`os/bash/command_policy.py:496`), so that works.
+
+WanDog took a different route on purpose: `config.clock_line()` puts the date
+**and** the time in the prompt, because a date with no time made the model
+invent a time (measured 9/12 before that line existed, 12/12 after). Keeping
+that was right -- it is faster and it costs no tool call.
+
+Measured on the live model with the real 14-tool set, 13 questions:
+
+    9 plain questions   answered from the prompt clock, no tool call   correct
+    4 timezone questions  bash TZ="..." date                          correct
+
+So "it fails to use the tool for telling the time" does not reproduce as a tool
+problem. What does reproduce is the clock going **stale**, which is the failure
+the prompt makes possible and the guard does not catch:
+
+    clock frozen at 06:30, real time 11:33
+    "What time is it?"  ->  no call, "It is 6:30 AM."        wrong by 5 hours
+
+The guard says "never state a clock time you have not been given". A stale
+clock *was* given, so the guard is satisfied and the model answers confidently.
+`ClockedLLMService` already re-reads the clock on every inference and is
+idempotent (verified: the stale time is gone, exactly one clock remains, the
+prompt does not grow). What was missing was a test that says so, and that is
+`test_tool_guidance.py` group 4.
+
+**The real bug was in the clock line itself.** It read:
+
+    (PST, UTC+0800)
+
+This host is on Asia/Manila. Its abbreviation is PST -- *Philippine* Standard
+Time -- and PST is far more widely read as *Pacific* Standard Time, UTC-0800.
+The line contradicted itself. The model happened to trust the offset and got it
+right, but a person reading the transcript gets a 16-hour error. `_zone_name()`
+now resolves the IANA name out of `/etc/localtime`, so the line reads:
+
+    (Asia/Manila, PST, UTC+0800)
+
+### GitHub
+
+"Do you have my GitHub token?" -> "I do not have access to your GitHub token."
+"Can you push to my GitHub?" -> "I can't push directly to GitHub yet."
+
+Both false. The token was in `secrets.yaml` (93 chars, `github_pat_...`),
+`config.tool_secret_env()` forwarded it, and `github_repo` with
+`action=list` returned real repositories in 1.8 s. Nothing was broken except
+the model's belief about itself: `TOOLS_SYSTEM_PROMPT` never mentioned GitHub,
+so it inferred its capability from the tool description, which says "Requires
+GITHUB_TOKEN" -- a caveat, not a statement of fact.
+
+The worse failure is the other direction. "Can you see my GitHub repos?" ->
+"I sure can!" with **no call**. It claimed access without finding out, which is
+the same defect as claiming it had none.
+
+The fix names GitHub in the prompt and makes the claim conditional on a call:
+
+  * never claim it can or cannot reach GitHub without checking;
+  * a read (`action list` / `get`) is its own confirmation;
+  * a write -- create, fork, delete, push -- must state the account and the
+    repository and wait for the person to confirm;
+  * a missing scope is not "no access", and must be described as what it is.
+
+Measured after: "Do you have access to my GitHub?" now calls `github_repo
+action=list` and answers from the result, instead of asserting.
+
+### Long tasks
+
+`bash` is a foreground call and the voice loop waits on it -- a measured 60 s
+`sleep` held the call for the full 60 s, and `MCP_TOOL_TIMEOUT` is 320 s.
+`serve` is the detached path: it returned in 0.5 s with a pid and a log path,
+and `action logs` read `tick-1..tick-4` six seconds later.
+
+The prompt said nothing about which to use, so routing was luck:
+
+    "run ./build.sh and tell me when it finishes"  -> bash("./build.sh")
+    "the test suite takes about 15 minutes"        -> serve(...)   (only
+                                                     because the question
+                                                     said "minutes")
+
+After the change all four phrasings route to `serve`, including the one that
+never says how long it takes. The rule is stated rather than inferred from the
+word "minutes": anything that may outlast a sentence goes to `serve`, and the
+agent must not call it done until `serve` says it stopped.
+
+### Tests
+
+`test_clock.py` 8/8 (the zone assertion was tightened to require the IANA name
+and to reject `PST` beside a negative offset). `test_tool_guidance.py` 5/5.
+Also re-ran `test_tool_parity` (14 tools), `test_tool_secrets` and
+`test_tool_secrets_live` (GITHUB_TOKEN reaches both spawned servers),
+`test_eventbus`, `test_turn_context`, `test_turn_live`, and
+`test_endtoend_answer`, which spoke a live reply with the new clock line.
