@@ -225,6 +225,12 @@ Run the suite with the venv interpreter; every file is standalone (`python test_
 | `test_bargein.py` / `test_guard.py` / `test_eventbus.py` | barge-in wiring, tool guardrails, dashboard events |
 | `test_dashboard_ui.py` | the dashboard's controls write the right control files: Send writes the typed text and clears the box, Send becomes Stop while a turn is in flight, Stop writes the stop file, the mic toggle flips (8 checks, via Streamlit's AppTest) |
 | `test_dashboard_controls.py` | the agent side of those controls: a typed message reaches the LLM context as a user turn, the control file is consumed so it is never answered twice, Stop broadcasts exactly one interruption, and the watcher really is upstream of the aggregator in `build_pipeline` |
+| `test_session.py` | the session pointer and folder layout: continue by default, `--restart-session` mints a new one, the dashboard never mints, traversal in an id is refused, and `config` derives every path from the live session |
+| `test_session_launch.py` | the same thing through four real launches of `agent.py`, asserting the folder, the log and the jail each time |
+| `test_session_jail.py` | the per-call `data_path`: injected only on tools that declare it, the model's own value overwritten, and a real spawned server refusing a sibling session's file |
+| `test_session_replay.py` | continuity and the handover notes: a continued session replays its turns, a restarted one replays nothing, a Clear truncates the replay, and compaction replaces the running lines with a summary |
+| `test_upload.py` | uploads and the three tiers: size, type and traversal refusals, the strict prompt, the tier phrases, and `set_tools` really removing and restoring the web tools |
+| `test_upload_e2e.py` | the join: the dashboard stores the file, the real watcher consumes the control file once, and the agent speaks the question rather than ingesting the file silently |
 
 ## 🖥️ Dashboard
 
@@ -245,13 +251,77 @@ without taking the other down:
 | Mic toggle | `<log>.mic_control.json` | pushes `STTMuteFrame` to the ASR (barge-in still works) |
 | Send (typed text) | `<log>.typed.json` | appends the message to the LLM context and runs inference — the reply is spoken like any other |
 | Stop | `<log>.stop.json` | broadcasts an `InterruptionFrame`: the same path a barge-in takes, so it stops the LLM mid-generation and cuts the TTS |
+| Clear | `<log>.clear.json` | `LLMMessagesUpdateFrame(messages=[])` with `run_llm=False`: the model forgets, nothing is spoken |
+| Attach a file | `<log>.upload.json` | says which file it has and asks what may be used, then records the answer |
 
-The composer is pinned to the bottom, with the mic on the left (where Ollama
-puts web search), the text box in the middle, and Send — which becomes Stop
-while a turn is in flight — on the right. File upload and model selection are
-disabled placeholders, kept so the layout is already final.
+The composer is pinned to the bottom, with the attach control on the left, the
+mic beside it, the text box in the middle, and Send — which becomes Stop
+while a turn is in flight — on the right. Model selection is still a
+disabled placeholder, kept so the layout is already final.
 
 The mic is blue while the agent is accepting audio and monochrome while muted.
+
+## 📁 Sessions
+
+One session is one folder. The agent continues the previous session by default;
+`--restart-session` starts a new one with an empty chat history.
+
+```
+.venv/bin/python agent.py                       # continue the last session
+.venv/bin/python agent.py --restart-session     # start a new one
+```
+
+The root is `../wandog-sessions` relative to this checkout — beside the repo,
+never inside it, so sessions are never committed and a `git clean` cannot delete
+someone's work. `WANDOG_SESSIONS_ROOT` overrides it. The consequence worth
+knowing: moving or re-cloning the repo does not move the sessions with it.
+
+```
+wandog-sessions/
+  .current                    which session is live
+  <id>/                       e.g. 2026-11-18T1620-a3f1
+    meta.json                 id, start time, model, search mode, uploads
+    events.jsonl              the log the dashboard tails
+    notes/session.md          the handover record
+    work/                     the folder the agent's tools are jailed to
+      uploads/  created/  tool-results/
+```
+
+`notes/` is deliberately outside `work/`: the agent writes it in-process, so a
+session's own file tools can neither rewrite its log nor edit its history.
+
+Continuing a session replays the last 20 turns of `user_text`/`bot_text` into the
+model's context, stopping at the last Clear — so "continue" means the
+conversation continues, not just the folder. Tool traffic is not replayed.
+
+The notes file is written twice over: one line per turn as the turn lands (so a
+hard kill still leaves a record), then compacted into a summary on shutdown. That
+summary is what a different session reads when asked what happened here.
+
+Each session's tool calls are confined to its own `work/` folder by injecting
+`data_path` per call, which OnIt's servers enforce as the boundary — so one
+session cannot read a sibling's files.
+
+## 📎 Uploading a file, and the search tiers
+
+Attach a file from the composer and it is stored in the session's
+`work/uploads/`. The agent does not ingest it silently: it says which file it has
+and asks what it may use. The answer picks one of three tiers, narrowest first.
+The order is enforced by which tools the model is given, not by asking it
+nicely:
+
+| tier | reaches | tools |
+|---|---|---|
+| `strict` | only the uploaded file | file tools only — no `local_search`, no web |
+| `session` | + the rest of this session's files | + `local_search` (the default) |
+| `expanded` | + the web | everything |
+
+In `strict` the agent is told to say plainly that something is *not in* the file
+rather than guessing, and to offer to widen the search. Saying "only that file",
+"use the other files", or "yes, search the web" changes the tier and is recorded
+in `meta.json`. The dashboard shows a caption whenever the tier is not the
+default, because a limit you cannot see is indistinguishable from not knowing.
+
 `tools/shot.py` screenshots the running page after it hydrates (plain
 `chromium --screenshot` captures Streamlit's blank shell instead).
 

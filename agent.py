@@ -28,6 +28,7 @@ import json
 
 import config
 import mcp_bridge
+import session
 from resample import AudioResampleProcessor
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -176,11 +177,14 @@ class DashboardControlWatcher(FrameProcessor):
 
     def __init__(self, typed_path: str, stop_path: str, bus=None,
                  poll_secs: float = 0.2, clear_path: str | None = None,
+                 upload_path: str | None = None, session_id: str = "",
                  **kwargs):
         super().__init__(**kwargs)
         self._typed_path = Path(typed_path)
         self._stop_path = Path(stop_path)
         self._clear_path = Path(clear_path) if clear_path else None
+        self._upload_path = Path(upload_path) if upload_path else None
+        self._session_id = session_id
         self._bus = bus
         self._poll = poll_secs
         self._task: asyncio.Task | None = None
@@ -189,6 +193,7 @@ class DashboardControlWatcher(FrameProcessor):
         self._last_typed_id = None
         self._last_stop_id = None
         self._last_clear_id = None
+        self._last_upload_id = None
 
     # -- file plumbing -----------------------------------------------------
 
@@ -278,6 +283,56 @@ class DashboardControlWatcher(FrameProcessor):
         if self._bus is not None:
             await self._bus.emit("cleared")
 
+    async def _handle_upload(self, payload: dict) -> None:
+        """Turn an uploaded file into a spoken question.
+
+        An upload is not a silent ingestion. The user is about to be answered
+        from a file, so the first thing the agent says is which file it has and
+        what it may use -- that file alone, this session's files too, or the web
+        as well. The answer is recorded in the session's meta.json, and it is
+        what later turns enforce (see apply_search_mode).
+
+        The file itself has already been written by the dashboard into
+        work/uploads/, which is inside this session's tool jail, so the agent
+        reads it with read_file like any other file rather than receiving its
+        contents through the control file.
+        """
+        up_id = payload.get("id")
+        if up_id is not None and up_id == self._last_upload_id:
+            return
+        self._last_upload_id = up_id
+
+        name = (payload.get("name") or "").strip()
+        if not name:
+            return
+        logger.info(" uploaded: {}", name)
+        if self._bus is not None:
+            await self._bus.emit("upload", name=name,
+                                 bytes=payload.get("bytes"),
+                                 path=payload.get("path"),
+                                 session=self._session_id)
+
+        # The spoken gate. A fixed sentence with the filename in it, and
+        # deliberately a question: the tier decides what every later answer in
+        # this session may draw on, so it is the user's call, not the model's.
+        prompt = (
+            f"I've got {name}. Should I answer only from that file, so if "
+            f"something isn't in it I'll say so -- or may I also use the other "
+            f"files in this session, and search the web after that?"
+        )
+        from pipecat.frames.frames import LLMMessagesAppendFrame, TTSSpeakFrame
+        # Spoken as a literal, not through the LLM: the question is fixed, and
+        # letting the model paraphrase it risks it answering the upload as if
+        # the upload were the request.
+        await self.queue_frame(TTSSpeakFrame(text=prompt))
+        # Also in the context, so a typed follow-up ("just the file") has the
+        # question to answer and the model knows the file exists.
+        await self.queue_frame(
+            LLMMessagesAppendFrame(
+                messages=[{"role": "assistant", "content": prompt}], run_llm=False
+            )
+        )
+
     async def _watch(self):
         while True:
             typed = self._take(self._typed_path)
@@ -290,6 +345,10 @@ class DashboardControlWatcher(FrameProcessor):
                 clear = self._take(self._clear_path)
                 if clear is not None:
                     await self._handle_clear(clear)
+            if self._upload_path is not None:
+                upload = self._take(self._upload_path)
+                if upload is not None:
+                    await self._handle_upload(upload)
             await asyncio.sleep(self._poll)
 
     # -- pipeline ----------------------------------------------------------
@@ -524,7 +583,76 @@ class ClockedLLMService(OpenAILLMService):
             self._base_system_instruction = updated
 
 
-def wire_transcript_events(user_agg, assistant_agg, bus) -> None:
+def _tool_name(t) -> str:
+    """The name of one entry in a ToolsSchema: a DirectFunctionWrapper exposes
+    the wrapped callable as .function, a FunctionSchema carries .name."""
+    fn = getattr(t, "function", None)
+    if fn is not None:
+        return getattr(fn, "__name__", "") or getattr(t, "name", "")
+    return getattr(t, "__name__", "") or getattr(t, "name", "")
+
+
+def apply_search_mode(llm, context, bridge, mode: str, uploads=None) -> None:
+    """Narrow or widen what this session may answer from, for real.
+
+    Two halves, and both are needed:
+
+      * the TOOLS. In ``strict`` the model is left only the file tools, so it
+        cannot route around "only that file" by searching the web anyway. This
+        is the half that actually enforces anything -- Pipecat's OpenAI adapter
+        reads the context's tools on every request, so a change here takes
+        effect on the next turn without rebuilding the pipeline.
+
+      * the PROMPT. The tool list says what is *possible*; the sentence says
+        what is *wanted*, including what to say when the file does not contain
+        the answer ("that isn't in report.pdf") and that widening the search is
+        the user's decision, not the model's.
+
+    Enforcing in the harness rather than asking nicely is the same principle as
+    the approval Guard: a promise the model can ignore is not a promise.
+
+    ``context.tools`` is a ``ToolsSchema``, not a list -- it keeps the original
+    callables on ``.direct_functions``, which is what has to be filtered and
+    handed back, or Pipecat would lose the handlers along with the schemas.
+    """
+    if context is None:
+        return
+
+    # Filter from the FULL set every time, never from what the context happens
+    # to hold now. Narrowing removes tools from the context, so filtering the
+    # context would make a mode change one-way: strict would take the web tools
+    # away and no later answer could put them back. The bridge's own list is the
+    # complete set, and it is what the pipeline was built with.
+    everything = list(bridge.tools) if bridge is not None and bridge.tools else \
+        [t.function for t in (getattr(context.tools, "direct_functions", None) or [])]
+    if everything:
+        names = [_tool_name(t) for t in everything]
+        keep = set(session.allowed_tool_names(mode, names))
+        kept = [t for t in everything if _tool_name(t) in keep]
+        context.set_tools(kept)
+        logger.info("  Answering scope {}: {}/{} tools", mode, len(kept),
+                    len(everything))
+
+    # The mode sentence is appended to the system instruction rather than
+    # replacing it: the persona, the clock and the tools guidance all still
+    # apply, and the clock is refreshed into the same string on a timer.
+    if llm is not None:
+        try:
+            base = getattr(llm, "_base_system_instruction", None) or \
+                llm._settings.system_instruction or ""
+            if isinstance(base, str):
+                marker = "\n\nAnswering scope: "
+                if marker in base:
+                    base = base.split(marker)[0]
+                llm._settings.system_instruction = (
+                    base + marker + session.mode_prompt(mode, uploads))
+                llm._base_system_instruction = llm._settings.system_instruction
+        except Exception as e:  # noqa: BLE001 -- a prompt tweak must not break a turn
+            logger.warning("Could not set the answering scope: {}", e)
+
+
+def wire_transcript_events(user_agg, assistant_agg, bus,
+                           on_user_text=None) -> None:
     """Record the user's words and the bot's reply on the event bus.
 
     These two texts exist only inside the aggregators (see ``WanDogLogger``),
@@ -542,6 +670,15 @@ def wire_transcript_events(user_agg, assistant_agg, bus) -> None:
             if text:
                 logger.info(" {}", text)
                 await bus.emit("user_text", text=text)
+                session.append_turn(config.SESSION_ID, "user", text)
+                # A change of answering scope is a permission change, so it is
+                # matched here rather than inferred by the model. Only ever
+                # WIDENS or NARROWS within the three tiers; see session.py.
+                if on_user_text is not None:
+                    try:
+                        await on_user_text(text)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("Mode hook failed: {}", e)
 
     if assistant_agg is not None:
 
@@ -551,6 +688,7 @@ def wire_transcript_events(user_agg, assistant_agg, bus) -> None:
             if text:
                 logger.info(" {}", text)
                 await bus.emit("bot_text", text=text)
+                session.append_turn(config.SESSION_ID, "assistant", text)
 
 
 def report_mic_gain() -> None:
@@ -842,10 +980,39 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     # Pipecat warns about exactly this and calls the context copy deprecated.
     # It also made the clock unfixable: the stale copy in the context would
     # have shadowed any refresh of the settings one.
-    context_kwargs = {"messages": []}
+    #
+    # A continued session starts with the turns it already had. Replaying them
+    # here -- before the aggregators are built -- is what makes "continue the
+    # previous session" mean the conversation continues too, not just the
+    # folder. Only user/bot text is replayed; see session.read_turns for why
+    # tool traffic is deliberately left out, and why a `cleared` event
+    # truncates the history rather than being replayed past.
+    replayed = session.replay_messages(config.SESSION_ID) if config.SESSION_ID else []
+    context_kwargs = {"messages": replayed}
     if bridge is not None and bridge.tools:
         context_kwargs["tools"] = bridge.tools
     context = LLMContext(**context_kwargs)
+    if replayed:
+        logger.info("  Session {}: replaying {} message(s) of history",
+                    config.SESSION_ID, len(replayed))
+    # Confine every tool call to this session's work/ folder. The bridge injects
+    # it as `data_path` per call (see ToolBridgeProcessor._make_tool), and OnIt's
+    # server then treats it as the boundary for reads, writes and directory
+    # checks -- so a session cannot reach a sibling session's files.
+    if bridge is not None and config.SESSION_WORK_DIR:
+        bridge.session_data_path = config.SESSION_WORK_DIR
+    # The answering scope this session starts in. A continued session keeps
+    # whatever was last agreed (it is in meta.json); a new one starts at the
+    # default. Applying it here means the very first request already carries it,
+    # rather than the agent answering one turn too widely and narrowing after.
+    if config.SESSION_ID:
+        try:
+            apply_search_mode(llm, context, bridge,
+                              session.get_mode(config.SESSION_ID),
+                              session.uploaded_files(config.SESSION_ID))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not apply the session's search mode: {}", e)
+
     user_agg = LLMUserAggregator(context, params=user_params)
 
     # The assistant aggregator records the bot's replies into the SAME context.
@@ -856,8 +1023,25 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         context,
         params=LLMAssistantAggregatorParams(),
     )
+    # A change of answering scope, spoken or typed. Defined here because it
+    # needs the live llm and context; the transcript hook calls it.
+    async def _maybe_change_mode(text: str) -> None:
+        if not config.SESSION_ID:
+            return
+        want = session.mode_from_text(text)
+        if want is None or want == session.get_mode(config.SESSION_ID):
+            return
+        session.set_mode(config.SESSION_ID, want)
+        apply_search_mode(llm, context, bridge, want,
+                          session.uploaded_files(config.SESSION_ID))
+        logger.info("  Search mode -> {}", want)
+        if bus is not None:
+            await bus.emit("search_mode", mode=want, source="user",
+                           text=text[:200])
+
     # Hook the transcript events before the pipeline runs so no turn is missed.
-    wire_transcript_events(user_agg, assistant_agg, bus)
+    wire_transcript_events(user_agg, assistant_agg, bus,
+                           on_user_text=_maybe_change_mode)
 
     # --- Pipeline ------------------------------------------------------------
     # mic -> resample -> ASR -> user agg (VAD + barge-in) -> LLM -> [assistant
@@ -904,6 +1088,8 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
         bus=bus,
         poll_secs=config.DASHBOARD_CONTROL_POLL_SECS,
         clear_path=config.DASHBOARD_CLEAR_FILE,
+        upload_path=config.DASHBOARD_UPLOAD_FILE,
+        session_id=config.SESSION_ID,
     ))
     stages.append(user_agg)
     stages.append(llm)
@@ -961,9 +1147,17 @@ async def run() -> None:
     await bus.emit("session_start",
                    llm=config.LLM_MODEL, base_url=config.LLM_BASE_URL,
                    asr=describe_asr(),
-                   tools=len(bridge.tools) if bridge else 0)
+                   tools=len(bridge.tools) if bridge else 0,
+                   session=config.SESSION_ID,
+                   restarted=session.wants_restart())
 
     logger.info("WanDog starting")
+    if config.SESSION_ID:
+        logger.info("  Session: {} ({})", config.SESSION_ID,
+                    "new" if session.wants_restart() else "continued")
+        logger.info("  Folder : {}", config.SESSION_DIR)
+    else:
+        logger.info("  Session: none (WANDOG_DASHBOARD_LOG is pinned)")
     logger.info("  LLM : {} @ {}", config.LLM_MODEL, config.LLM_BASE_URL)
     logger.info("  ASR : {}", describe_asr())
     logger.info("  TTS : Piper {} ({})", config.PIPER_VOICE, config.PIPER_VOICE_DIR)
@@ -1009,6 +1203,17 @@ async def run() -> None:
         if bridge is not None:
             await bridge.close()
         await bus.emit("session_end")
+        # Compact the handover notes. Done here, on the way out, so the file a
+        # different session reads is a summary rather than the running lines
+        # the turns appended -- those exist so a hard kill still leaves a
+        # record, and are replaced once the session ends cleanly.
+        if config.SESSION_ID:
+            try:
+                session.compact(config.SESSION_ID, model=config.LLM_MODEL)
+                logger.info("  Notes compacted: {}",
+                            session.notes_path(config.SESSION_ID))
+            except Exception as e:  # noqa: BLE001 -- never block shutdown
+                logger.warning("Could not compact session notes: {}", e)
         logger.info("Bye!")
 
 

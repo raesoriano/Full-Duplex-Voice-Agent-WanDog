@@ -596,93 +596,142 @@ each, in the style of the existing `test_*` files.
 
 ## 5. Task 5 — file upload, session folder, and source-of-truth confirmation
 
-**Plan only, by request. Nothing here is to be built in this pass.**
+**DONE, 18 Nov 2026** — built on branch `file-upload`. The section below is the
+plan as it was written; §5.0 records what changed when it was built, because two
+of the plan's decisions were wrong and one was incomplete.
 
-### 5.1 Session folder
+### 5.0 What the build changed
 
-Today the file jail is a single flat root, `/tmp/onit/data` (`MCP_DATA_PATH`), shared
-by everything. The proposal is one folder per conversation:
+**The root moved, and that was the important correction.** The plan put sessions
+under `/tmp/onit/data/sessions/`. `/tmp` is tmpfs on this host
+(`findmnt -no FSTYPE,TARGET /tmp` → `tmpfs`), so it is RAM, wiped on reboot —
+which makes "the agent continues the previous session by default" false after
+every restart, and destroys the handover notes, which are the whole point. The
+root is now `../wandog-sessions` relative to the checkout, so it is durable,
+beside the repo (never committed, never inside a `git clean`), and portable: it
+resolves from `__file__`, not from a hardcoded path. `WANDOG_SESSIONS_ROOT`
+overrides it.
+
+**The jail root had to become the sessions root, not stay flat.** The plan kept
+`MCP_DATA_PATH` unchanged and put sessions inside it. That works, but it means
+one shared jail: a session cannot be confined, because every session sits in the
+same boundary. OnIt's servers accept a per-call `data_path` and enforce it as the
+boundary, *provided it sits inside the server-wide* `DATA_PATH` — so the
+sessions root has to *be* `MCP_DATA_PATH` for a session to be its own jail. That
+is what makes one session unable to read a sibling's files, which the plan did
+not attempt.
+
+**The mode is enforced by removing tools, and that needed a fix the plan did not
+anticipate.** `LLMContext.set_tools` does narrow what the next request carries,
+because the OpenAI adapter reads `context.tools` per request. But filtering the
+*context's* current tools makes the change one-way: once `strict` removes the web
+tools they are gone from the context, so no later answer can put them back. The
+filter has to run from the bridge's full list every time.
+
+**Three tiers, not two.** The user's hierarchy is: the uploaded file, then the
+other files in this session, then the web. So `strict` / `session` / `expanded`,
+and the middle tier is free — `local_search` already indexes the session base
+directory when given one, so "search this session's files" needed no new code.
+
+**What is still not built:** the sidebar, session switching, and reading another
+session's notes on request. Every session's folder is already on disk, so the
+sidebar is a reader over folders that exist. The one real blocker is that reading
+a sibling's notes cannot go through a tool — the jail forbids it by design — so
+it has to be in-process, which needs a way to name the session, which is the
+sidebar.
+
+### 5.1 Session folder (as built)
 
 ```
-/tmp/onit/data/sessions/<session-id>/
-    uploads/       files the user sent
-    created/       files the agent wrote
-    tool-results/  full tool output, when §1.2 caps what the model sees
-    meta.json      session id, start time, model, and the mode flag below
+wandog-sessions/                 <- MCP_DATA_PATH (the jail root)
+  .current                       pointer: the live session id
+  <id>/                          e.g. 2026-11-18T1620-a3f1
+    meta.json                    id, started, model, mode, uploads[]
+    events.jsonl                 the log the dashboard tails
+    notes/session.md             handover record, compacted on shutdown
+    work/                        <- injected as data_path: the tool jail
+      uploads/  created/  tool-results/
 ```
 
-`session-id` is generated at `session_start` and emitted on the bus, so the dashboard
-can show the folder and the log can name it. The jail root is unchanged; only the
-working subdirectory moves. That keeps the existing `ONIT_DATA_PATH` validation
-intact — a session folder is *inside* the jail, not a new jail.
+`notes/` is outside `work/` on purpose: the agent writes it in-process, so a
+session's own file tools can neither rewrite its log nor edit its history. That is
+the "separate folder from the temporary folder" the requirement asked for, made
+literal.
 
-### 5.2 Upload path
+`session.py` resolves this at import, from `config.py`, so `DASHBOARD_LOG` and the
+four control files all derive from one variable and the two processes cannot
+disagree about which session is live. Only the agent mints a session; the dashboard
+follows the pointer. A session folder is a side effect of *running* WanDog, not of
+importing it — otherwise every test that does `import config` would leave one
+beside the checkout.
 
-Streamlit's `st.file_uploader` writes the file into the dashboard process's memory,
-so it must be handed to the agent the same way every other control is: the dashboard
-writes the bytes to `<log>.upload.json` (path + declared name + size), and the agent
-copies them into `uploads/` under a sanitised name, rejecting path traversal, size
-over a cap, and any type outside an allowlist. The copy, not the original name, is
-what the tools see.
+### 5.2 Upload path (as built)
 
-An upload is not a silent ingestion. It is a question.
+The file is written by the **dashboard**, into the session's `work/uploads/` —
+the folder the agent's tools are already jailed to — so the agent reads it with
+`read_file` like any other file rather than receiving its bytes through a control
+file. What travels through `<log>.upload.json` is the name, which is all the
+spoken question needs.
 
-### 5.3 The confirmation gate — the core of the requirement
+Refused with a sentence a person can hear: over 2 MB, an extension outside the
+allowlist, an empty file, a name that traverses. A same-named upload is numbered
+rather than overwriting the file the agent was told to answer from.
 
-> verify if the user wants to only use that file as a source of truth and say when a
-> piece of information is not there, or if they would like to expand the search.
+The composer's attach control was a disabled placeholder; it is now a popover
+holding `st.file_uploader`, which keeps the composer's height fixed (the layout
+test's geometry assertions depend on that) and keeps the `attachph` key.
 
-So an upload triggers a **spoken question**, not an action:
+### 5.3 The confirmation gate (as built)
 
-> "I've got `report.pdf`. Should I answer only from this file, or may I also search
-> the web and your other documents?"
+An upload is a spoken question, not an ingestion: the agent says which file it has
+and asks what it may use. The answer sets a per-session tier in `meta.json`.
 
-The answer sets a per-session mode, persisted in `meta.json`:
+| Tier       | Reaches                          | Tools offered              |
+|------------|----------------------------------|----------------------------|
+| `strict`   | only the uploaded file           | file tools only            |
+| `session`  | + the rest of this session       | + `local_search` (default) |
+| `expanded` | + the web                        | everything                 |
 
-| Mode       | Behaviour                        | When info is missing    |
-|------------|----------------------------------|-------------------------|
-| `strict`   | only the uploaded file(s)        | say plainly it is not   |
-|            |                                  | in the file — **do not**|
-|            |                                  | go looking              |
-| `expanded` | file first, then web + local     | say where it found it,  |
-|            | corpus                           | and that it came from   |
-|            |                                  | outside the file        |
+The three properties the plan demanded, all met:
 
-Three properties this must have to be honest:
+1. **Visible.** The dashboard shows a caption whenever the tier is not the default.
+   A limit you cannot see is indistinguishable from the agent not knowing.
+2. **`strict` failures are explicit.** The prompt names the file and says to say
+   plainly that something is *not in* it, not to guess, and to offer to widen the
+   search.
+3. **Changes are recorded.** The tier change is matched deterministically in the
+   harness (`session.mode_from_text`) — not inferred by the model, because a
+   permission change it can talk itself out of is not a permission change — and
+   written to `meta.json` and the event log.
 
-1. **The mode is visible.** The dashboard shows a banner — "answering only from
-   `report.pdf`" — so the user is never in doubt which mode is live.
-2. **`strict` failures are explicit.** Not a generic "I don't know", but "that isn't
-   in `report.pdf`" — the requirement says *say when a piece of information is not
-   there*.
-3. **Mode changes are spoken and recorded.** Switching mid-session is allowed and
-   must be confirmed, because silently widening the search would break the promise
-   the strict mode made.
+### 5.4 The plan's open questions, answered
 
-Mechanically, `strict` is a system-prompt constraint plus a tool filter: `search`
-and `local_search` are not offered while strict mode is on, so the model cannot
-route around the promise even if it wants to. That is stronger than asking it
-nicely, and matches how the project already handles refusals — enforce in the
-harness, not in the prompt alone.
+- *Does an upload end the turn, or join mid-conversation?* It joins: the question
+  is spoken as a literal and appended to the context with `run_llm=False`, so it
+  does not start an inference of its own.
+- *Multiple files: one mode for the session, or per file?* One mode per session.
+  The tier is a property of the conversation, and a per-file mode would mean the
+  agent had to remember which rule applied to which file mid-answer.
+- *Should `strict` still allow `read_file` on the session folder?* Yes — and only
+  that. The file must be readable; nothing wider is.
+- *Retention?* A session folder survives forever. Nothing prunes it, which is a
+  known gap: a long-lived deployment will accumulate folders and there is no
+  `--forget` yet.
 
-### 5.4 Open questions to settle before building
+### 5.5 Acceptance criteria — all met, verified 18 Nov 2026
 
-- Does an upload end the current turn, or join the context mid-conversation?
-- Multiple files: one mode for the session, or per file?
-- Should `strict` mode still allow `read_file` on the session folder only? (Yes,
-  recommended — the file itself must be readable.)
-- Retention: does a session folder survive a restart, and for how long?
-
-### 5.5 Acceptance criteria (for when it is built)
-
-- An uploaded file lands in `sessions/<id>/uploads/` and is readable by `read_file`.
-- The agent asks the strict/expanded question before answering anything about it.
-- In `strict`, a question the file cannot answer produces "that isn't in the file",
-  and no web search is attempted — verifiable in the event log by the absence of a
-  `tool_call`.
-- The dashboard shows the active mode for the whole session.
-
----
+- An uploaded file lands in `<id>/work/uploads/` and is readable by `read_file`
+  (`test_upload.py`, `test_upload_e2e.py`).
+- The agent asks the strict/expanded question before answering anything about it
+  (`test_upload_e2e.py` asserts the spoken frame).
+- In `strict`, the web tools are absent from the context, so a web search is not
+  merely discouraged but impossible (`test_upload.py` asserts `set_tools` really
+  removes and restores them).
+- The dashboard shows the active tier for the whole session.
+- Continuing a session replays its turns; `--restart-session` starts empty
+  (`test_session_launch.py`, `test_session_replay.py`).
+- One session cannot read a sibling's files (`test_session_jail.py`, against a
+  real spawned OnIt server).
 
 ## 6. Sequence and dependencies
 
@@ -693,7 +742,7 @@ Task 2 (secrets)  ──► Task 1 (spoken tools) ──► Task 3 (benchmark)
       │  its key to succeed  │  speaks is what the    │  baseline the
       │                      │  benchmark exercises   │  others protect
       ▼                      ▼                        ▼
-Task 4 (dashboard UI) ──► Task 5 (upload + mode)  [plan only]
+Task 4 (dashboard UI) --> Task 5 (upload + mode, DONE)
         text input and stop are the
         same file-polling pattern the
         upload will need

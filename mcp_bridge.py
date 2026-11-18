@@ -86,7 +86,13 @@ class OnItMCPServer:
         spawn_env = dict(os.environ)
         spawn_env["ONIT_DATA_PATH"] = config.MCP_DATA_PATH
         if config.MCP_DOCUMENTS_PATH:
-            spawn_env["DOCUMENTS_PATH"] = config.MCP_DOCUMENTS_PATH
+            # ONIT_DOCUMENTS_PATH, not DOCUMENTS_PATH: all three servers read
+            # the ONIT_-prefixed name (tools/mcp_server.py, bash/mcp_server.py,
+            # local/search/mcp_server.py). The bare name was set here for
+            # months and had never had any effect -- harmless only because
+            # MCP_DOCUMENTS_PATH defaults to "". Fixed before the sessions work
+            # made it matter.
+            spawn_env["ONIT_DOCUMENTS_PATH"] = config.MCP_DOCUMENTS_PATH
         spawn_env["ONIT_STDIO_SPAWNED"] = "1"
         spawn_env["ONIT_APPROVAL_CHANNEL"] = "1"
         spawn_env["ONIT_COMMAND_ALLOWLIST"] = "1"
@@ -1295,6 +1301,15 @@ class ToolBridgeProcessor(FrameProcessor):
         self.servers = servers
         self._tool_server: dict[str, OnItMCPServer] = {}
         self.tools: list[Callable] = []
+        # Tools whose schema declares `data_path`, and which therefore accept
+        # the per-call jail. Tracked per tool because OnIt's server validates
+        # every argument against the tool's schema: sending `data_path` to a
+        # tool that does not declare it is a hard rejection, not a hint.
+        self._accepts_data_path: set[str] = set()
+        # The directory a session's tool calls are confined to. Set by
+        # agent.build_pipeline from config.SESSION_WORK_DIR; empty means "no
+        # per-session jail", which is how everything behaved before sessions.
+        self.session_data_path: str = ""
         # The approval gate. When present, every tool call is routed through
         # it so OnIt's ``needs_approval`` payloads reach a person.
         self.guard = guard or Guard()
@@ -1388,6 +1403,18 @@ class ToolBridgeProcessor(FrameProcessor):
             # fixed phrase on purpose: it must not depend on the model.
             await self._say(_announcement(name))
             call_args = dict(kwargs)
+            # The per-session jail. OnIt's file and bash tools take a
+            # `data_path` that becomes the boundary for every read, write and
+            # directory check, and it is trusted precisely because the harness
+            # sets it -- the model's own value is overwritten here, not merged.
+            # That is what makes one session unable to reach a sibling's
+            # folder, which a single shared jail could not do.
+            #
+            # Sent only to tools whose schema declares the parameter: OnIt's
+            # server validates arguments against the tool's schema, so adding
+            # it everywhere would make every non-file tool fail.
+            if self.session_data_path and name in self._accepts_data_path:
+                call_args["data_path"] = self.session_data_path
             # How many results the caller asked for. _shape_search_args
             # over-fetches so the date sort has something to choose from, and
             # records the real number under a private key. It is popped here
@@ -1501,6 +1528,11 @@ class ToolBridgeProcessor(FrameProcessor):
         _handler.__signature__ = inspect.Signature(parameters=params)
         _handler.__onit_schema__ = schema  # type: ignore[attr-defined]
         _handler.__onit_server__ = server.name  # type: ignore[attr-defined]
+        # Does this tool take the per-call jail? Only the ones whose schema
+        # says so. OnIt's server validates arguments against the schema, so a
+        # tool without `data_path` must not be sent one.
+        if "data_path" in props:
+            self._accepts_data_path.add(name)
         return _handler
 
     async def _refresh_stale_news(self, text: str, name: str, call_args: dict,

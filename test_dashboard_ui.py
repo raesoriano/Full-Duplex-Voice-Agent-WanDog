@@ -147,14 +147,32 @@ def test_mic_toggle_writes_state() -> None:
     print("6. mic toggle writes, and flips back               OK")
 
 
-def test_placeholders_are_disabled() -> None:
+def test_attach_is_live_and_model_is_still_a_placeholder() -> None:
+    """Attach is a working control now; the model picker is still a placeholder.
+
+    The attach control used to be checked here as a disabled button. It is a
+    popover holding a file uploader since the upload feature landed, so the
+    check moved to what is actually true: the model picker is disabled, and the
+    attach control exists and is NOT disabled. The layout test owns the
+    geometry; this one owns the enabled/disabled contract.
+    """
     _seed({"kind": "session_start", "ts": time.time()})
     at = AppTest.from_file(DASHBOARD, default_timeout=60).run()
-    for key in ("attachph_btn", "modelph_btn"):
-        btn = [b for b in at.button if b.key == key]
-        assert btn, f"{key} placeholder is missing"
-        assert btn[0].disabled, f"{key} placeholder is not disabled"
-    print("7. attach + model placeholders are disabled       OK")
+    assert not list(at.exception), list(at.exception)
+
+    model = [b for b in at.button if b.key == "modelph_btn"]
+    assert model, "modelph_btn placeholder is missing"
+    assert model[0].disabled, "modelph_btn placeholder is not disabled"
+
+    # Attach is a popover, and AppTest does not surface a popover's trigger as
+    # a button -- it appears as a Block holding the panel's children. So the
+    # check is on what the panel actually contains: a file uploader, which is
+    # the thing that makes the control live. Asserting on a button here would
+    # pass only while the control was the disabled placeholder.
+    uploaders = list(at.get("file_uploader"))
+    assert uploaders, "the attach popover holds no file uploader"
+    assert uploaders[0].key == "attach_file", uploaders[0].key
+    print("7. attach is live, model is a placeholder        OK")
 
 
 def test_transcript_renders_without_markup_leak() -> None:
@@ -296,7 +314,7 @@ def main() -> int:
         test_send_returns_after_the_turn_ends,
         test_stale_turn_does_not_stick_on_stop,
         test_mic_toggle_writes_state,
-        test_placeholders_are_disabled,
+        test_attach_is_live_and_model_is_still_a_placeholder,
         test_transcript_renders_without_markup_leak,
         test_clear_writes_file_and_empties_the_view,
         test_clear_survives_a_reload,

@@ -23,6 +23,30 @@ import os
 import sys
 from pathlib import Path
 
+import session
+
+# ---------------------------------------------------------------------------
+# Session -- resolved FIRST, before any path below is derived
+# ---------------------------------------------------------------------------
+# One session is one folder, and the folder holds the event log. Resolving it
+# here, at import, is what lets every constant below follow from a single
+# variable: DASHBOARD_LOG becomes the session's events.jsonl, and the four
+# control files are derived from it, so the agent and the dashboard cannot
+# disagree about which session is live -- both read the same pointer file.
+#
+# This is also why the flag is read here rather than in agent.py's main():
+# --restart-session decides WHICH session this process is, and that question is
+# answered before anything else. See session.py.
+#
+# No-op when WANDOG_DASHBOARD_LOG is already set, so a caller (and the tests
+# that pin it) can point the agent at a plain log with no session at all.
+SESSION_DIR = session.activate()
+SESSION_ID = SESSION_DIR.name if SESSION_DIR else ""
+# The tool jail for this session: uploaded and created files. Deliberately not
+# the session folder itself -- notes/ and events.jsonl stay out of reach of the
+# agent's own file tools.
+SESSION_WORK_DIR = str(SESSION_DIR / "work") if SESSION_DIR else ""
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -290,11 +314,22 @@ ONIT_PYTHON = os.environ.get(
 )
 
 # The jail root for the file tools. OnIt's bash server defaults its DATA_PATH
-# to <tmp>/onit/data; we pin the same value so a tool call can only read/write
-# inside it (read_file may also reach DOCUMENTS_PATH). Keep this a directory
-# WanDog is allowed to touch.
+# to <tmp>/onit/data; we pin it so a tool call can only read/write inside it
+# (read_file may also reach DOCUMENTS_PATH). Keep this a directory WanDog is
+# allowed to touch.
+#
+# It is the SESSIONS ROOT, not a per-session folder, and that is load-bearing.
+# The per-call `data_path` the bridge injects (see mcp_bridge._make_tool) is
+# only accepted by OnIt's server when it sits INSIDE the server-wide DATA_PATH:
+#
+#     if base != abs_data and not base.startswith(abs_data + os.sep):
+#         raise ValueError("data_path must be within the server data directory")
+#
+# So the root has to contain every session for a session to be its own jail.
+# /tmp was the old value and is tmpfs -- wiped on reboot, which would make
+# "continue the previous session" false after every restart.
 MCP_DATA_PATH = os.environ.get(
-    "WANDOG_MCP_DATA_PATH", "/tmp/onit/data"
+    "WANDOG_MCP_DATA_PATH", str(session.root())
 )
 # Extra read-only documents dir for read_file (OnIt's DOCUMENTS_PATH).
 MCP_DOCUMENTS_PATH = os.environ.get("WANDOG_MCP_DOCS_PATH", "")
@@ -455,7 +490,14 @@ MCP_NEWS_TAVILY_DEPTH = os.environ.get(
 DASHBOARD_ENABLED = os.environ.get("WANDOG_DASHBOARD", "0") == "1"
 # Where the agent writes the JSONL event log the dashboard tails. The
 # approval files live next to it: <log>.pending.json and <log>.decision.json.
-DASHBOARD_LOG = os.environ.get("WANDOG_DASHBOARD_LOG", "/tmp/wandog_events.jsonl")
+#
+# Default is the live session's events.jsonl. The /tmp fallback is kept for the
+# one case session.activate() declines to resolve -- a dashboard started before
+# any agent has ever run, which has no session to show yet.
+DASHBOARD_LOG = os.environ.get(
+    "WANDOG_DASHBOARD_LOG",
+    str(session.events_path(SESSION_ID)) if SESSION_ID
+    else "/tmp/wandog_events.jsonl")
 # Streamlit bind: 0.0.0.0 so other devices on the LAN can open it.
 DASHBOARD_HOST = os.environ.get("WANDOG_DASHBOARD_HOST", "0.0.0.0")
 DASHBOARD_PORT = int(os.environ.get("WANDOG_DASHBOARD_PORT", 8501))
@@ -507,6 +549,13 @@ DASHBOARD_CLEAR_FILE = os.environ.get(
 # for the appended name, found nothing, and reported the working toggle as
 # broken. Default unchanged from the old with_suffix() path so an existing
 # deployment keeps reading the same file.
+# The upload control file: the dashboard writes {id, name, path, ts} after it has
+# stored the file in the session's work/uploads/, and the agent turns it into a
+# spoken question. Same one-shot file mechanism as the other controls, for the
+# same reason -- the two processes must not have to be up at the same time.
+DASHBOARD_UPLOAD_FILE = os.environ.get(
+    "WANDOG_DASHBOARD_UPLOAD",
+    str(Path(DASHBOARD_LOG).with_name(Path(DASHBOARD_LOG).name + ".upload.json")))
 DASHBOARD_MIC_FILE = os.environ.get(
     "WANDOG_DASHBOARD_MIC",
     str(Path(DASHBOARD_LOG).with_suffix(".mic_control.json")))

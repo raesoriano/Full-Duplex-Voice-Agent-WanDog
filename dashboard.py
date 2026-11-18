@@ -66,12 +66,20 @@ from pathlib import Path
 import streamlit as st
 
 import config
+import session as sess
 
 LOG_PATH = Path(config.DASHBOARD_LOG)
 MIC_CONTROL_FILE = Path(config.DASHBOARD_MIC_FILE)
 TYPED_FILE = Path(config.DASHBOARD_TYPED_FILE)
 STOP_FILE = Path(config.DASHBOARD_STOP_FILE)
 CLEAR_FILE = Path(config.DASHBOARD_CLEAR_FILE)
+UPLOAD_FILE = Path(config.DASHBOARD_UPLOAD_FILE)
+
+# Upload ids this process has already stored. A full-app rerun (Send, Clear,
+# the theme toggle) rebuilds this script from the top, so this cannot live in
+# session_state -- and re-storing the same bytes would duplicate the file and
+# ask the source-of-truth question out loud a second time.
+_SEEN_UPLOADS: set = set()
 
 ASSETS = Path(__file__).parent / "assets"
 # The three icons in assets/, committed as-is:
@@ -680,6 +688,38 @@ def send_typed(text: str) -> None:
     _drop(TYPED_FILE, {"id": uuid.uuid4().hex, "text": text, "ts": time.time()})
 
 
+def send_upload(name: str, data: bytes) -> str:
+    """Store an uploaded file in the session and hand the agent a notification.
+
+    The file is written HERE, into the session's work/uploads/ -- the folder the
+    agent's tools are jailed to -- so the agent reads it with read_file like any
+    other file instead of receiving its contents through a control file. What
+    travels through the control file is the name, which is all the spoken
+    question needs.
+
+    Returns "" on success, or a sentence to show the person on refusal. The
+    refusals are the interesting part: an oversized file, a type WanDog does not
+    read, or no live session to put it in.
+    """
+    if not config.SESSION_ID:
+        return ("No session is running yet. Start the agent first, then "
+                "attach the file.")
+    try:
+        stored = sess.store_upload(config.SESSION_ID, name, data)
+    except ValueError as e:
+        return str(e)
+    except OSError as e:
+        return f"Could not save that file: {e}"
+    _drop(UPLOAD_FILE, {
+        "id": uuid.uuid4().hex,
+        "name": stored.name,
+        "path": str(stored),
+        "bytes": stored.stat().st_size,
+        "ts": time.time(),
+    })
+    return ""
+
+
 def request_stop() -> None:
     _drop(STOP_FILE, {"id": uuid.uuid4().hex, "ts": time.time()})
 
@@ -857,6 +897,21 @@ with st.container(key="topbar"):
             )
 
         identity()
+
+    # The answering scope, when it is not the default. A strict session is
+    # answering from one file only, and that has to be visible: a limit the
+    # person cannot see is indistinguishable from the agent not knowing
+    # something. Shown only when narrowed, so the normal case stays quiet.
+    if config.SESSION_ID:
+        _mode = sess.get_mode(config.SESSION_ID)
+        if _mode != sess.DEFAULT_MODE:
+            _ups = sess.uploaded_files(config.SESSION_ID)
+            _src = (", ".join(u["name"] for u in _ups)
+                    if _ups else "no file yet")
+            st.caption(
+                "Answering from " + _src if _mode == "strict"
+                else "Answering from this session's files and the web"
+            )
 
     with h_theme:
         # The glyph is the theme you would switch TO, which is the OnIt
@@ -1349,15 +1404,42 @@ with st.container(key="composer"):
     )
 
     with c_attach:
-        # Placeholder: file upload comes later.
-        with st.container(key="attachph"):
-            st.button(
-                "",
-                key="attachph_btn",
-                icon=":material/attach_file:",
-                disabled=True,
-                help="Attach a file (coming soon)",
+        # The file upload. A popover rather than a bare uploader: the composer
+        # is one row of controls, and st.file_uploader is a dropzone that would
+        # push the row open. The popover keeps the row's height fixed, which is
+        # what test_dashboard_layout.py's geometry assertions rely on.
+        #
+        # st.popover is a button plus a panel, so the key stays attachph_btn --
+        # the same key the placeholder used, which is also the key the UI test
+        # looks for.
+        with st.popover("", icon=":material/attach_file:",
+                        help="Attach a file for this session"):
+            st.caption(
+                f"Files go in this session's folder. Up to "
+                f"{sess.UPLOAD_MAX_BYTES // (1024 * 1024)} MB: "
+                + ", ".join(sorted(e.lstrip('.') for e in sess.UPLOAD_EXTENSIONS))
             )
+            picked = st.file_uploader(
+                "Attach a file",
+                key="attach_file",
+                label_visibility="collapsed",
+                accept_multiple_files=False,
+                type=[e.lstrip(".") for e in sorted(sess.UPLOAD_EXTENSIONS)],
+            )
+            if picked is not None:
+                # One write per file, guarded on the id Streamlit gives the
+                # upload: the popover reruns on every keystroke in the
+                # composer, and without this the same file would be stored
+                # (and spoken about) on every one of them. A module-level
+                # set, not session_state: Send does a full-app rerun, which
+                # rebuilds this script from the top.
+                if picked.file_id not in _SEEN_UPLOADS:
+                    err = send_upload(picked.name, picked.getvalue())
+                    if err:
+                        st.error(err)
+                    else:
+                        _SEEN_UPLOADS.add(picked.file_id)
+                        st.success(f"Attached {picked.name}")
 
     with c_mic:
         mic_button()
