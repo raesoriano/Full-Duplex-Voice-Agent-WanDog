@@ -144,7 +144,32 @@ def test_mic_toggle_writes_state() -> None:
 
     at.button(key="micbtn_btn").click().run()
     assert json.loads(MIC.read_text())["enabled"] is True, MIC.read_text()
-    print("6. mic toggle writes, and flips back               OK")
+
+    # The tooltip must describe the state AFTER the click, in both directions.
+    #
+    # It used to be computed from the pre-click value, because `help` is
+    # rendered before an `if clicked:` block runs. Measured on the old code:
+    # after muting it still read "Listening", and after unmuting it read
+    # "Muted" -- exactly one click behind, which is what got reported as "the
+    # description on the mute button is flipped". Nothing asserted it, so the
+    # suite stayed green through the whole bug.
+    def tip() -> str:
+        return [b for b in at.button if b.key == "micbtn_btn"][0].help
+
+    MIC.unlink(missing_ok=True)
+    at = AppTest.from_file(DASHBOARD, default_timeout=60).run()
+    assert "Currently Listening" in tip(), tip()
+    assert "Click to Mute" in tip(), tip()
+
+    at.button(key="micbtn_btn").click().run()
+    assert "Currently Muted" in tip(), f"still showing the old state: {tip()}"
+    assert "Click to Listen" in tip(), tip()
+
+    at.button(key="micbtn_btn").click().run()
+    assert "Currently Listening" in tip(), f"still showing the old state: {tip()}"
+    assert "Click to Mute" in tip(), tip()
+
+    print("6. mic toggle writes, flips back, tooltip follows  OK")
 
 
 def test_placeholders_are_disabled() -> None:

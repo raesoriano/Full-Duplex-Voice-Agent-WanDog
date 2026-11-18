@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     ErrorFrame,
     Frame,
+    InputAudioRawFrame,
     LLMTextFrame,
     StartFrame,
     STTMuteFrame,
@@ -86,6 +87,56 @@ class MicControlWatcher(FrameProcessor):
     the ASR stops transcribing. Muting the ASR (rather than dropping audio)
     keeps VAD and barge-in behaviour intact and is the officially supported
     way to stop a Pipecat STT service.
+
+    Muting the STT is not enough on its own
+    ---------------------------------------
+    ``STTMuteFrame`` is honoured in exactly one place in Pipecat:
+    ``STTService.process_frame`` (``elif isinstance(frame, STTMuteFrame): self._muted
+    = frame.mute``). ``VADProcessor`` has no such branch -- it forwards the
+    frame and keeps analysing every ``InputAudioRawFrame`` it receives. The
+    pipeline runs the VAD BEFORE the STT, so the VAD is upstream of this
+    processor and the mute never reached it.
+
+    Measured, with the real pipeline and 4.5 s of speech, muted vs live:
+
+        mic LIVE    VAD start frames 1   activity frames 19
+        mic MUTED   VAD start frames 1   activity frames 19
+
+    Identical -- which is the report: "the VAD trips even when I am muted".
+    The dashboard opened a turn and showed the agent listening, and no
+    transcript could ever follow, because the STT was discarding the audio.
+
+    So this processor also gates the audio. ``process_frame`` drops
+    ``InputAudioRawFrame`` while muted, which is what makes the mute true for
+    BOTH consumers of the microphone: the ``VADProcessor`` upstream and the
+    user aggregator downstream, which owns a second analyzer and would
+    otherwise trip on the same speech.
+
+    Where it has to sit
+    -------------------
+    IMMEDIATELY AFTER the resampler and BEFORE the ``VADProcessor``. Dropping
+    audio further down the pipeline is too late: the VAD is upstream of the
+    STT, so it has already analysed the frame by the time anything downstream
+    sees it. Measured with the gate placed after the STT: the aggregator's
+    audio count went 223 -> 0, and the VAD still reported 1 start frame and 19
+    activity frames, identical to unmuted.
+
+    Because it now sits upstream of the STT, the mute frame is BROADCAST
+    rather than pushed upstream -- pushed, it would travel to the resampler and
+    the transport and never reach the STT that acts on it. Broadcast sends it
+    both ways, so it still lands on the STT while this processor stays ahead of
+    the VAD.
+
+    Why dropping audio is safe
+    --------------------------
+    ``VADController`` runs an ``audio_idle_timeout`` (1.0 s by default, and
+    used by both controllers) that forces a speech stop when no audio arrives
+    while it believes the person is speaking. So muting mid-sentence closes
+    that turn instead of hanging it open with the Send button stuck on Stop.
+
+    The ``STTMuteFrame`` is still sent. It is what stops the STT emitting a
+    partial for a segment already in flight, and it keeps the mute visible in
+    the STT's own logs.
     """
 
     def __init__(self, control_path: str, poll_secs: float = 0.5, **kwargs):
@@ -94,6 +145,10 @@ class MicControlWatcher(FrameProcessor):
         self._poll = poll_secs
         self._last: bool | None = None
         self._task: asyncio.Task | None = None
+        # Starts unmuted, matching the STT and the missing-file default. The
+        # first poll replaces this within poll_secs, and _watch applies that
+        # first read, so a persisted "muted" is true from the first tick.
+        self._enabled = True
 
     def _read(self) -> bool:
         """True = mic enabled. Missing/corrupt file means enabled."""
@@ -124,10 +179,15 @@ class MicControlWatcher(FrameProcessor):
             enabled = self._read()
             if first or enabled != self._last:
                 logger.info("Mic {}", "enabled" if enabled else "muted")
-                # Upstream: the STT sits before us in the pipeline.
-                await self.push_frame(
-                    STTMuteFrame(mute=not enabled), FrameDirection.UPSTREAM
-                )
+                # Set before the push so process_frame starts gating audio in
+                # the same instant the STT is told. The other order leaves one
+                # poll interval in which the STT is muted and the VAD is not --
+                # the exact window this class exists to close.
+                self._enabled = enabled
+                # Broadcast, not upstream: this processor now sits ahead of
+                # the VAD, so the STT is DOWNSTREAM of it. A pushed frame would
+                # go to the resampler and the transport and never arrive.
+                await self.broadcast_frame(STTMuteFrame, mute=not enabled)
                 self._last = enabled
                 first = False
             await asyncio.sleep(self._poll)
@@ -136,6 +196,13 @@ class MicControlWatcher(FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, StartFrame) and self._task is None:
             self._task = asyncio.create_task(self._watch())
+        # Swallow the microphone while muted, in either direction.
+        #
+        # Direction is not checked: the VAD is upstream and the aggregator
+        # downstream, so an audio frame travelling the other way is still the
+        # microphone, and neither consumer should see it.
+        if not self._enabled and isinstance(frame, InputAudioRawFrame):
+            return
         await self.push_frame(frame, direction)
 
     async def cleanup(self):
@@ -860,9 +927,9 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     wire_transcript_events(user_agg, assistant_agg, bus)
 
     # --- Pipeline ------------------------------------------------------------
-    # mic -> resample -> ASR -> user agg (VAD + barge-in) -> LLM -> [assistant
-    # agg] -> TTS. The user aggregator sits after ASR so it sees the user's
-    # audio (for VAD) and the transcript (for context) and pushes the
+    # mic -> resample -> MIC GATE -> ASR -> user agg (VAD + barge-in) -> LLM ->
+    # [assistant agg] -> TTS. The user aggregator sits after ASR so it sees the
+    # user's audio (for VAD) and the transcript (for context) and pushes the
     # LLMContextFrame to the LLM. When ASR is off the LLM takes raw audio.
     # VAD MUST run before the STT. SegmentedSTTService only transcribes when it
     # receives VADUserStoppedSpeakingFrame, and its process_frame() swallows
@@ -872,19 +939,34 @@ def build_pipeline(api_key: str, bridge: "mcp_bridge.ToolBridgeProcessor | None"
     # flushed a segment and the agent appeared completely deaf. VADProcessor
     # broadcasts its frames to every processor, so the STT and the aggregator
     # both receive them.
+    # The mic gate sits above the VAD for the same reason it must: the VAD is
+    # upstream of the STT, so anything that gates audio at or below the STT has
+    # already let the VAD hear it.
     stages = [
         input_transport,
         AudioResampleProcessor(capture_rate, proc_rate),
-        VADProcessor(vad_analyzer=vad_analyzer),
     ]
+    # The mic toggle MUST sit here: after the resampler, BEFORE the VAD.
+    #
+    # It used to sit after the STT, on the reasoning that STTMuteFrame travels
+    # upstream to the STT that consumes it. That is true for the STT and false
+    # for the VAD, which is upstream of this point and has no STTMuteFrame
+    # branch at all -- so a muted mic still ran the analyzer over every frame.
+    # Measured through the real pipeline with 4.5 s of speech: muted produced
+    # 1 VAD start frame and 19 activity frames, identical to unmuted, and the
+    # dashboard opened a turn and showed the agent listening while no
+    # transcript could follow.
+    #
+    # Ahead of the VAD it can swallow the microphone before either analyzer
+    # sees it -- the VADProcessor's, and the user aggregator's further down.
+    # It broadcasts its STTMuteFrame, so the STT downstream still receives it.
+    stages.append(MicControlWatcher(config.DASHBOARD_MIC_FILE))
+    stages.append(VADProcessor(vad_analyzer=vad_analyzer))
     if stt is not None:
         stages.append(stt)
         # Publish the live partial transcripts the streaming ASR emits. Must sit
         # between the STT and the aggregator: the aggregator consumes them.
         stages.append(PartialTranscriptTap(bus))
-    # The mic toggle pushes STTMuteFrame UPSTREAM, so it must sit downstream of
-    # the STT for that frame to reach it.
-    stages.append(MicControlWatcher(config.DASHBOARD_MIC_FILE))
     # Typed text and the Stop button from the dashboard.
     #
     # MUST sit BEFORE the user aggregator. A typed message is delivered by

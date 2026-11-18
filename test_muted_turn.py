@@ -150,7 +150,12 @@ async def mute_frames_on_start(start_muted: bool) -> list[bool]:
 
     stt, sink = RecordingSTT(), Sink()
     watcher = agent.MicControlWatcher(str(mic), poll_secs=0.05)
-    task = PipelineTask(Pipeline([stt, watcher, sink]))
+    # The REAL order (agent.py): the mic gate sits BEFORE the VAD and therefore
+    # before the STT, and broadcasts its STTMuteFrame so the STT downstream
+    # still receives it. The harness used to put the watcher after the STT,
+    # which matched the old upstream-only push and would now pass while the
+    # real pipeline was wired the other way round.
+    task = PipelineTask(Pipeline([watcher, stt, sink]))
     runner = WorkerRunner()
     await runner.add_workers(task)
     running = asyncio.create_task(runner.run(auto_end=False))
