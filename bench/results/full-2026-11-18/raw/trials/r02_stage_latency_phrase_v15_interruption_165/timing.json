@@ -1,0 +1,83 @@
+{
+  "trial": "r02_stage_latency_phrase_v15_interruption_165",
+  "group": "stage_latency",
+  "clip": "phrase_v15_interruption_165",
+  "variant": "main",
+  "expected": "answer the phrase",
+  "duration": 12.0,
+  "events": [
+    {
+      "name": "first",
+      "t": 0.0,
+      "len": 2.616
+    }
+  ],
+  "live_bot_starts": [
+    5.024
+  ],
+  "live_bot_ends": [
+    11.648
+  ],
+  "rig": {
+    "rig": "direct",
+    "her_out_sr": 16000,
+    "clears": 1
+  },
+  "clip_meta": {
+    "text": "How can I train my dog to follow basic commands?",
+    "source": "v15_interruption_165"
+  },
+  "mono": [
+    9611.197448845,
+    9623.18392654
+  ],
+  "bot_segments": [
+    [
+      4.994,
+      11.678
+    ]
+  ],
+  "play_first": [
+    0.0,
+    2.616
+  ],
+  "tor": 1,
+  "first_start": 4.994,
+  "spoke_s": 5.622,
+  "user_end": 2.366,
+  "latency": 2.6279999999999997,
+  "actual": "replied 2.63 s after speech end",
+  "verdict": "✓ 2.63 s",
+  "ok": true,
+  "marks": 29,
+  "final": {
+    "stages": {
+      "e2e_heard": 2.628,
+      "e2e": 1.9926,
+      "e2e_source": "marks",
+      "asr_final": 1.0126,
+      "llm_ttft": 0.5125,
+      "tts_ttfb": 0.4492,
+      "endpointing": 0.6473,
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ],
+      "transcript": "How can I train my dog to follow basic commands?",
+      "wer": {
+        "ref_words": 10,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "context_tokens": 662,
+      "context_source": "estimate",
+      "context_messages": 37
+    }
+  },
+  "scored_at": "2026-11-18T18:40:29+08:00"
+}

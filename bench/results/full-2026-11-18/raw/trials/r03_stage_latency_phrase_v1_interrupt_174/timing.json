@@ -1,0 +1,83 @@
+{
+  "trial": "r03_stage_latency_phrase_v1_interrupt_174",
+  "group": "stage_latency",
+  "clip": "phrase_v1_interrupt_174",
+  "variant": "main",
+  "expected": "answer the phrase",
+  "duration": 11.936,
+  "events": [
+    {
+      "name": "first",
+      "t": 0.0,
+      "len": 2.464
+    }
+  ],
+  "live_bot_starts": [
+    5.152
+  ],
+  "live_bot_ends": [
+    11.584
+  ],
+  "rig": {
+    "rig": "direct",
+    "her_out_sr": 16000,
+    "clears": 1
+  },
+  "clip_meta": {
+    "text": "How can I protect my online accounts?",
+    "source": "v1_interrupt_174"
+  },
+  "mono": [
+    9684.718512385,
+    9696.65590277
+  ],
+  "bot_segments": [
+    [
+      5.122,
+      11.614
+    ]
+  ],
+  "play_first": [
+    0.0,
+    2.464
+  ],
+  "tor": 1,
+  "first_start": 5.122,
+  "spoke_s": 5.3420000000000005,
+  "user_end": 2.526,
+  "latency": 2.596,
+  "actual": "replied 2.60 s after speech end",
+  "verdict": "✓ 2.60 s",
+  "ok": true,
+  "marks": 29,
+  "final": {
+    "stages": {
+      "e2e_heard": 2.596,
+      "e2e": 1.9566,
+      "e2e_source": "marks",
+      "asr_final": 0.9633,
+      "llm_ttft": 0.5269,
+      "tts_ttfb": 0.4401,
+      "endpointing": 0.6472,
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ],
+      "transcript": "How can I protect my online account?",
+      "wer": {
+        "ref_words": 7,
+        "edits": 1,
+        "wer": 0.14285714285714285
+      },
+      "context_tokens": 830,
+      "context_source": "estimate",
+      "context_messages": 45
+    }
+  },
+  "scored_at": "2026-11-18T18:40:29+08:00"
+}

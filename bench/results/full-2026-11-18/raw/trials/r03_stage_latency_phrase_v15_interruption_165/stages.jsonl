@@ -1,0 +1,29 @@
+{"stage": "vad_start", "t": 9771.409051942, "pid": 21907, "src": "ws", "recv": 9771.495765143, "lt": 9771.40964646, "tt": 0.5161}
+{"stage": "vad_start", "t": 9771.409077294, "pid": 21907, "src": "ws", "recv": 9771.500211475, "lt": 9771.409671812, "tt": 0.5161}
+{"stage": "vad_start", "t": 9771.494169217, "pid": 21907, "src": "ws", "recv": 9771.500234345, "lt": 9771.494763735, "tt": 0.6012}
+{"stage": "vad_start", "t": 9771.494227458, "pid": 21907, "src": "ws", "recv": 9771.50025103, "lt": 9771.494821976, "tt": 0.6013}
+{"stage": "interrupted", "t": 9771.494293125, "pid": 21907, "src": "ws", "recv": 9771.50026566, "lt": 9771.494887643, "tt": 0.6013}
+{"stage": "interrupted", "t": 9771.494315958, "pid": 21907, "src": "ws", "recv": 9771.500280068, "lt": 9771.494910476, "tt": 0.6014}
+{"stage": "asr_partial", "t": 9771.886217212, "pid": 21907, "text": "How can i", "src": "ws", "recv": 9771.888416712, "lt": 9771.88681173, "tt": 0.9933}
+{"stage": "asr_partial", "t": 9772.206038077, "pid": 21907, "text": "How can i trade", "src": "ws", "recv": 9772.208025392, "lt": 9772.206632595, "tt": 1.3131}
+{"stage": "asr_partial", "t": 9772.525919109, "pid": 21907, "text": "How can i trade my dog", "src": "ws", "recv": 9772.527306239, "lt": 9772.526513627, "tt": 1.633}
+{"stage": "asr_partial", "t": 9772.845775956, "pid": 21907, "text": "How can i trade my dog to follow", "src": "ws", "recv": 9772.848402956, "lt": 9772.846370474, "tt": 1.9528}
+{"stage": "asr_partial", "t": 9773.1658316, "pid": 21907, "text": "How can i trade my dog to follow base", "src": "ws", "recv": 9773.170617691, "lt": 9773.166426118, "tt": 2.2729}
+{"stage": "asr_partial", "t": 9773.485466707, "pid": 21907, "text": "How can i trade my dog to follow base a com", "src": "ws", "recv": 9773.486674688, "lt": 9773.486061225, "tt": 2.5925}
+{"stage": "asr_partial", "t": 9773.805433351, "pid": 21907, "text": "How can i trade my dog to follow base a commands", "src": "ws", "recv": 9773.807388906, "lt": 9773.806027869, "tt": 2.9125}
+{"stage": "vad_end", "t": 9773.903835178, "pid": 21907, "src": "ws", "recv": 9773.905257178, "lt": 9773.904429696, "tt": 3.0109}
+{"stage": "vad_end", "t": 9773.903908771, "pid": 21907, "src": "ws", "recv": 9773.905309234, "lt": 9773.904503289, "tt": 3.0109}
+{"stage": "vad_end", "t": 9773.905926604, "pid": 21907, "src": "ws", "recv": 9773.906936752, "lt": 9773.906521122, "tt": 3.013}
+{"stage": "vad_end", "t": 9773.906024159, "pid": 21907, "src": "ws", "recv": 9773.906983252, "lt": 9773.906618677, "tt": 3.0131}
+{"stage": "asr_final", "t": 9774.893715531, "pid": 21907, "text": "How can I train my dog to follow basic commands?", "src": "ws", "recv": 9774.894708049, "lt": 9774.894310049, "tt": 4.0008}
+{"stage": "llm_request", "t": 9774.908820638, "pid": 21907, "messages": 55, "chars": 4066, "est_tokens": 1016, "src": "ws", "recv": 9774.922350672, "lt": 9774.909415156, "tt": 4.0159}
+{"stage": "user_stopped", "t": 9774.908841342, "pid": 21907, "src": "ws", "recv": 9774.922421802, "lt": 9774.90943586, "tt": 4.0159}
+{"stage": "user_stopped", "t": 9774.908851138, "pid": 21907, "src": "ws", "recv": 9774.922435339, "lt": 9774.909445656, "tt": 4.0159}
+{"stage": "llm_first_token", "t": 9775.417375405, "pid": 21907, "src": "ws", "recv": 9775.417986867, "lt": 9775.417969923, "tt": 4.5244}
+{"stage": "tts_request", "t": 9775.451778415, "pid": 21907, "src": "ws", "recv": 9775.456278192, "lt": 9775.452372933, "tt": 4.5588}
+{"stage": "tts_first_audio", "t": 9775.920989209, "pid": 21907, "src": "ws", "recv": 9775.92527956, "lt": 9775.921583727, "tt": 5.028}
+{"stage": "audio_out", "t": 9775.926747856, "pid": 21907, "src": "ws", "recv": 9775.95565096, "lt": 9775.927342374, "tt": 5.0338}
+{"stage": "audio_out", "t": 9775.927900726, "pid": 21907, "src": "ws", "recv": 9775.955675534, "lt": 9775.928495244, "tt": 5.0349}
+{"stage": "bot_stopped", "t": 9782.770443008, "pid": 21907, "src": "ws", "recv": 9782.772073545, "lt": 9782.771037526, "tt": 11.8775}
+{"stage": "bot_stopped", "t": 9782.77047686, "pid": 21907, "src": "ws", "recv": 9782.772178785, "lt": 9782.771071378, "tt": 11.8775}
+{"stage": "llm_request", "t": 9782.7721851, "pid": 21907, "messages": 56, "chars": 4216, "est_tokens": 1054, "src": "ws", "recv": 9782.7733421, "lt": 9782.772779618, "tt": 11.8792}

@@ -1,0 +1,83 @@
+{
+  "trial": "r03_stage_latency_phrase_v15_background_54",
+  "group": "stage_latency",
+  "clip": "phrase_v15_background_54",
+  "variant": "main",
+  "expected": "answer the phrase",
+  "duration": 8.96,
+  "events": [
+    {
+      "name": "first",
+      "t": 0.0,
+      "len": 2.232
+    }
+  ],
+  "live_bot_starts": [
+    4.64
+  ],
+  "live_bot_ends": [
+    7.744
+  ],
+  "rig": {
+    "rig": "direct",
+    "her_out_sr": 16000,
+    "clears": 1
+  },
+  "clip_meta": {
+    "text": "What's the stock price of Tesla right now?",
+    "source": "v15_background_54"
+  },
+  "mono": [
+    9755.606478304,
+    9764.559213331
+  ],
+  "bot_segments": [
+    [
+      4.61,
+      7.774
+    ]
+  ],
+  "play_first": [
+    0.0,
+    2.232
+  ],
+  "tor": 1,
+  "first_start": 4.61,
+  "spoke_s": 3.1639999999999997,
+  "user_end": 1.982,
+  "latency": 2.628,
+  "actual": "replied 2.63 s after speech end",
+  "verdict": "✓ 2.63 s",
+  "ok": true,
+  "marks": 29,
+  "final": {
+    "stages": {
+      "e2e_heard": 2.628,
+      "e2e": 1.9941,
+      "e2e_source": "marks",
+      "asr_final": 0.9816,
+      "llm_ttft": 0.5134,
+      "tts_ttfb": 0.3773,
+      "endpointing": 0.6474,
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ],
+      "transcript": "What's the stock price of Tesla right now?",
+      "wer": {
+        "ref_words": 8,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "context_tokens": 988,
+      "context_source": "estimate",
+      "context_messages": 53
+    }
+  },
+  "scored_at": "2026-11-18T18:40:29+08:00"
+}

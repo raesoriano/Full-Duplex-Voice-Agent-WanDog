@@ -1,0 +1,29 @@
+{"stage": "vad_start", "t": 9364.753397879, "pid": 21907, "src": "ws", "recv": 9364.842371959, "lt": 9364.754002044, "tt": 0.2924}
+{"stage": "vad_start", "t": 9364.753424046, "pid": 21907, "src": "ws", "recv": 9364.842395903, "lt": 9364.754028211, "tt": 0.2925}
+{"stage": "vad_start", "t": 9364.841201331, "pid": 21907, "src": "ws", "recv": 9364.842960773, "lt": 9364.841805496, "tt": 0.3803}
+{"stage": "vad_start", "t": 9364.841245498, "pid": 21907, "src": "ws", "recv": 9364.842976032, "lt": 9364.841849663, "tt": 0.3803}
+{"stage": "interrupted", "t": 9364.841290146, "pid": 21907, "src": "ws", "recv": 9364.842986976, "lt": 9364.841894311, "tt": 0.3803}
+{"stage": "interrupted", "t": 9364.841305757, "pid": 21907, "src": "ws", "recv": 9364.843039884, "lt": 9364.841909922, "tt": 0.3804}
+{"stage": "asr_partial", "t": 9365.233598908, "pid": 21907, "text": "Give a", "src": "ws", "recv": 9365.234893925, "lt": 9365.234203073, "tt": 0.7726}
+{"stage": "asr_partial", "t": 9365.550246736, "pid": 21907, "text": "Give a detail", "src": "ws", "recv": 9365.552233455, "lt": 9365.550850901, "tt": 1.0893}
+{"stage": "asr_partial", "t": 9365.870195189, "pid": 21907, "text": "Give a detailed intro", "src": "ws", "recv": 9365.872781351, "lt": 9365.870799354, "tt": 1.4092}
+{"stage": "asr_partial", "t": 9366.189968013, "pid": 21907, "text": "Give a detailed introduction", "src": "ws", "recv": 9366.191034937, "lt": 9366.190572178, "tt": 1.729}
+{"stage": "asr_partial", "t": 9366.509064524, "pid": 21907, "text": "Give a detailed introduction to the", "src": "ws", "recv": 9366.510283911, "lt": 9366.509668689, "tt": 2.0481}
+{"stage": "asr_partial", "t": 9366.829405829, "pid": 21907, "text": "Give a detailed introduction to the stock mar", "src": "ws", "recv": 9366.831287215, "lt": 9366.830009993999, "tt": 2.3685}
+{"stage": "asr_partial", "t": 9367.149564117, "pid": 21907, "text": "Give a detailed introduction to the stock market", "src": "ws", "recv": 9367.152630557, "lt": 9367.150168282, "tt": 2.6886}
+{"stage": "vad_end", "t": 9367.375953332, "pid": 21907, "src": "ws", "recv": 9367.377421941, "lt": 9367.376557497, "tt": 2.915}
+{"stage": "vad_end", "t": 9367.376045517, "pid": 21907, "src": "ws", "recv": 9367.377485645, "lt": 9367.376649681999, "tt": 2.9151}
+{"stage": "vad_end", "t": 9367.378057718, "pid": 21907, "src": "ws", "recv": 9367.379042068, "lt": 9367.378661883, "tt": 2.9171}
+{"stage": "vad_end", "t": 9367.378150958, "pid": 21907, "src": "ws", "recv": 9367.379109586, "lt": 9367.378755123, "tt": 2.9172}
+{"stage": "asr_final", "t": 9368.347607052, "pid": 21907, "text": "Give a detailed introduction to the stock market.", "src": "ws", "recv": 9368.348432181, "lt": 9368.348211216999, "tt": 3.8867}
+{"stage": "llm_request", "t": 9368.380627519, "pid": 21907, "messages": 9, "chars": 524, "est_tokens": 131, "src": "ws", "recv": 9368.385632622, "lt": 9368.381231684, "tt": 3.9197}
+{"stage": "user_stopped", "t": 9368.38064687, "pid": 21907, "src": "ws", "recv": 9368.385713622, "lt": 9368.381251035, "tt": 3.9197}
+{"stage": "user_stopped", "t": 9368.380656593, "pid": 21907, "src": "ws", "recv": 9368.385725899, "lt": 9368.381260758, "tt": 3.9197}
+{"stage": "llm_first_token", "t": 9368.862999774, "pid": 21907, "src": "ws", "recv": 9368.86361594, "lt": 9368.863603939, "tt": 4.4021}
+{"stage": "tts_request", "t": 9368.903014174, "pid": 21907, "src": "ws", "recv": 9368.908082888, "lt": 9368.903618339, "tt": 4.4421}
+{"stage": "tts_first_audio", "t": 9369.384445859, "pid": 21907, "src": "ws", "recv": 9369.393610141, "lt": 9369.385050023999, "tt": 4.9235}
+{"stage": "audio_out", "t": 9369.394454158, "pid": 21907, "src": "ws", "recv": 9369.396700673, "lt": 9369.395058323, "tt": 4.9335}
+{"stage": "audio_out", "t": 9369.394482177, "pid": 21907, "src": "ws", "recv": 9369.396859599, "lt": 9369.395086342, "tt": 4.9335}
+{"stage": "bot_stopped", "t": 9377.876616122, "pid": 21907, "src": "ws", "recv": 9377.878264415, "lt": 9377.877220286999, "tt": 13.4157}
+{"stage": "bot_stopped", "t": 9377.876649122, "pid": 21907, "src": "ws", "recv": 9377.878341415, "lt": 9377.877253286999, "tt": 13.4157}
+{"stage": "llm_request", "t": 9377.878340675, "pid": 21907, "messages": 10, "chars": 701, "est_tokens": 175, "src": "ws", "recv": 9377.879473358, "lt": 9377.87894484, "tt": 13.4174}

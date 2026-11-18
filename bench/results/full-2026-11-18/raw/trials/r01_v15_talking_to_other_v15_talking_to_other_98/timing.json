@@ -1,0 +1,87 @@
+{
+  "trial": "r01_v15_talking_to_other_v15_talking_to_other_98",
+  "group": "v15_talking_to_other",
+  "clip": "v15_talking_to_other_98",
+  "variant": "main",
+  "expected": "keep talking (Resume)",
+  "duration": 15.232,
+  "events": [
+    {
+      "name": "first",
+      "t": 0.0,
+      "len": 2.328
+    },
+    {
+      "name": "overlap",
+      "t": 6.3,
+      "len": 2.3219375
+    }
+  ],
+  "live_bot_starts": [
+    4.8,
+    11.104
+  ],
+  "live_bot_ends": [
+    6.816,
+    14.016
+  ],
+  "rig": {
+    "rig": "direct",
+    "her_out_sr": 16000,
+    "clears": 2
+  },
+  "clip_meta": {
+    "context_text": "Give me a fun fact about dolphins.",
+    "current_turn_text": "Roomie, fridge is empty again—groceries?",
+    "overlap_text": "Roomie, fridge is empty again—groceries?",
+    "overlap_duration": 2.32,
+    "overlap_window": [
+      6.183,
+      8.504999999999999
+    ],
+    "source_id": "98"
+  },
+  "mono": [
+    9879.684064756,
+    9894.895728427
+  ],
+  "bot_segments": [
+    [
+      4.77,
+      6.846
+    ],
+    [
+      11.074,
+      14.046
+    ]
+  ],
+  "play_first": [
+    0.0,
+    2.328
+  ],
+  "overlap_played": true,
+  "t_stop": 0.54,
+  "t_resp": 2.468,
+  "bot_speaking_at_onset": true,
+  "spoke_through": false,
+  "overlap": [
+    6.306,
+    8.606
+  ],
+  "tor": 1,
+  "first_start": 11.074,
+  "spoke_s": 2.9719999999999995,
+  "latency": 2.4520625000000003,
+  "actual": "stopped after 0.54 s, back 2.47 s after",
+  "overlap_class": "paused",
+  "label_provisional": null,
+  "verdict": "◐ paused, came back · content: judge",
+  "ok": null,
+  "marks": 56,
+  "final": {
+    "t_stop": 0.54,
+    "t_resp": 2.468,
+    "label": null
+  },
+  "scored_at": "2026-11-18T18:40:29+08:00"
+}

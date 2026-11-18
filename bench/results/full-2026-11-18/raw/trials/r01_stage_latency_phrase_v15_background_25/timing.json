@@ -1,0 +1,83 @@
+{
+  "trial": "r01_stage_latency_phrase_v15_background_25",
+  "group": "stage_latency",
+  "clip": "phrase_v15_background_25",
+  "variant": "main",
+  "expected": "answer the phrase",
+  "duration": 10.144,
+  "events": [
+    {
+      "name": "first",
+      "t": 0.0,
+      "len": 2.136
+    }
+  ],
+  "live_bot_starts": [
+    4.576
+  ],
+  "live_bot_ends": [
+    9.6
+  ],
+  "rig": {
+    "rig": "direct",
+    "her_out_sr": 16000,
+    "clears": 1
+  },
+  "clip_meta": {
+    "text": "Tell me a fun science fact.",
+    "source": "v15_background_25"
+  },
+  "mono": [
+    9301.605067124,
+    9311.791382898
+  ],
+  "bot_segments": [
+    [
+      4.546,
+      9.63
+    ]
+  ],
+  "play_first": [
+    0.0,
+    2.136
+  ],
+  "tor": 1,
+  "first_start": 4.546,
+  "spoke_s": 5.0840000000000005,
+  "user_end": 1.886,
+  "latency": 2.66,
+  "actual": "replied 2.66 s after speech end",
+  "verdict": "✓ 2.66 s",
+  "ok": true,
+  "marks": 30,
+  "final": {
+    "stages": {
+      "e2e_heard": 2.66,
+      "e2e": 2.0564,
+      "e2e_source": "marks",
+      "asr_final": 0.9772,
+      "llm_ttft": 0.7586,
+      "tts_ttfb": 0.2791,
+      "endpointing": 0.6205,
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ],
+      "transcript": "Tell me a fun science fact.",
+      "wer": {
+        "ref_words": 6,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "context_tokens": 7,
+      "context_source": "estimate",
+      "context_messages": 1
+    }
+  },
+  "scored_at": "2026-11-18T18:40:29+08:00"
+}

@@ -1,0 +1,87 @@
+{
+  "trial": "r01_v15_background_v15_background_76",
+  "group": "v15_background",
+  "clip": "v15_background_76",
+  "variant": "main",
+  "expected": "keep talking (Resume)",
+  "duration": 12.768,
+  "events": [
+    {
+      "name": "first",
+      "t": 0.0,
+      "len": 1.528
+    },
+    {
+      "name": "overlap",
+      "t": 5.596,
+      "len": 1.5789375
+    }
+  ],
+  "live_bot_starts": [
+    4.096,
+    9.376
+  ],
+  "live_bot_ends": [
+    6.176,
+    11.552
+  ],
+  "rig": {
+    "rig": "direct",
+    "her_out_sr": 16000,
+    "clears": 2
+  },
+  "clip_meta": {
+    "context_text": "Cancel all timers.",
+    "current_turn_text": "",
+    "overlap_text": "I have to call my mom back.",
+    "overlap_duration": 1.58,
+    "overlap_window": [
+      5.254,
+      6.832999999999999
+    ],
+    "source_id": "76"
+  },
+  "mono": [
+    9968.009366199,
+    9980.751598252
+  ],
+  "bot_segments": [
+    [
+      4.066,
+      6.206
+    ],
+    [
+      9.346,
+      11.582
+    ]
+  ],
+  "play_first": [
+    0.0,
+    1.528
+  ],
+  "overlap_played": true,
+  "t_stop": 0.54,
+  "t_resp": 2.308,
+  "bot_speaking_at_onset": true,
+  "spoke_through": false,
+  "overlap": [
+    5.666,
+    7.038
+  ],
+  "tor": 1,
+  "first_start": 9.346,
+  "spoke_s": 2.2360000000000007,
+  "latency": 2.1710624999999997,
+  "actual": "stopped after 0.54 s, back 2.31 s after",
+  "overlap_class": "paused",
+  "label_provisional": null,
+  "verdict": "◐ paused, came back · content: judge",
+  "ok": null,
+  "marks": 52,
+  "final": {
+    "t_stop": 0.54,
+    "t_resp": 2.308,
+    "label": null
+  },
+  "scored_at": "2026-11-18T18:40:29+08:00"
+}

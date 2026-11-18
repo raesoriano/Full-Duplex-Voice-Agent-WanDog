@@ -1,0 +1,83 @@
+{
+  "trial": "r03_stage_latency_phrase_v15_background_84",
+  "group": "stage_latency",
+  "clip": "phrase_v15_background_84",
+  "variant": "main",
+  "expected": "answer the phrase",
+  "duration": 8.544,
+  "events": [
+    {
+      "name": "first",
+      "t": 0.0,
+      "len": 2.648
+    }
+  ],
+  "live_bot_starts": [
+    5.088
+  ],
+  "live_bot_ends": [
+    7.328
+  ],
+  "rig": {
+    "rig": "direct",
+    "her_out_sr": 16000,
+    "clears": 1
+  },
+  "clip_meta": {
+    "text": "Schedule a meeting with John on Friday at 2.",
+    "source": "v15_background_84"
+  },
+  "mono": [
+    9649.435496728,
+    9657.967288463
+  ],
+  "bot_segments": [
+    [
+      5.058,
+      7.358
+    ]
+  ],
+  "play_first": [
+    0.0,
+    2.648
+  ],
+  "tor": 1,
+  "first_start": 5.058,
+  "spoke_s": 2.3,
+  "user_end": 2.398,
+  "latency": 2.6599999999999997,
+  "actual": "replied 2.66 s after speech end",
+  "verdict": "✓ 2.66 s",
+  "ok": true,
+  "marks": 30,
+  "final": {
+    "stages": {
+      "e2e_heard": 2.66,
+      "e2e": 1.9944,
+      "e2e_source": "marks",
+      "asr_final": 0.9851,
+      "llm_ttft": 0.5095,
+      "tts_ttfb": 0.283,
+      "endpointing": 0.6835,
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ],
+      "transcript": "Schedule a meeting with John on Friday at 2.",
+      "wer": {
+        "ref_words": 9,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "context_tokens": 756,
+      "context_source": "estimate",
+      "context_messages": 41
+    }
+  },
+  "scored_at": "2026-11-18T18:40:29+08:00"
+}

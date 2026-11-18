@@ -1,0 +1,29 @@
+{"stage": "vad_start", "t": 9319.249253286, "pid": 21907, "src": "ws", "recv": 9319.338878437, "lt": 9319.250070098999, "tt": 1.0925}
+{"stage": "vad_start", "t": 9319.249279378, "pid": 21907, "src": "ws", "recv": 9319.33890964, "lt": 9319.250096191, "tt": 1.0925}
+{"stage": "vad_start", "t": 9319.337126273, "pid": 21907, "src": "ws", "recv": 9319.339891342, "lt": 9319.337943085999, "tt": 1.1804}
+{"stage": "vad_start", "t": 9319.337186273, "pid": 21907, "src": "ws", "recv": 9319.339983527, "lt": 9319.338003085999, "tt": 1.1805}
+{"stage": "interrupted", "t": 9319.337255921, "pid": 21907, "src": "ws", "recv": 9319.340080268, "lt": 9319.338072733999, "tt": 1.1805}
+{"stage": "interrupted", "t": 9319.337279847, "pid": 21907, "src": "ws", "recv": 9319.340097379, "lt": 9319.33809666, "tt": 1.1805}
+{"stage": "asr_partial", "t": 9319.726033822, "pid": 21907, "text": "What kind", "src": "ws", "recv": 9319.728985928, "lt": 9319.726850635, "tt": 1.5693}
+{"stage": "asr_partial", "t": 9320.045808164, "pid": 21907, "text": "What kind of mo", "src": "ws", "recv": 9320.047003403, "lt": 9320.046624977, "tt": 1.8891}
+{"stage": "asr_partial", "t": 9320.366274636, "pid": 21907, "text": "What kind of movies do", "src": "ws", "recv": 9320.367918781, "lt": 9320.367091449, "tt": 2.2095}
+{"stage": "asr_partial", "t": 9320.68889203, "pid": 21907, "text": "What kind of movies do you", "src": "ws", "recv": 9320.692342227, "lt": 9320.689708843, "tt": 2.5322}
+{"stage": "asr_partial", "t": 9321.005781879, "pid": 21907, "text": "What kind of movies do you think", "src": "ws", "recv": 9321.007040303, "lt": 9321.006598691998, "tt": 2.849}
+{"stage": "asr_partial", "t": 9321.325529113, "pid": 21907, "text": "What kind of movies do you think i would", "src": "ws", "recv": 9321.327657146, "lt": 9321.326345926, "tt": 3.1688}
+{"stage": "asr_partial", "t": 9321.64589229, "pid": 21907, "text": "What kind of movies do you think i would like", "src": "ws", "recv": 9321.649832654, "lt": 9321.646709102999, "tt": 3.4892}
+{"stage": "vad_end", "t": 9321.744033612, "pid": 21907, "src": "ws", "recv": 9321.745529202, "lt": 9321.744850424999, "tt": 3.5873}
+{"stage": "vad_end", "t": 9321.744116945, "pid": 21907, "src": "ws", "recv": 9321.745593461, "lt": 9321.744933757998, "tt": 3.5874}
+{"stage": "vad_end", "t": 9321.746209293, "pid": 21907, "src": "ws", "recv": 9321.747258291, "lt": 9321.747026105999, "tt": 3.5895}
+{"stage": "vad_end", "t": 9321.746309127, "pid": 21907, "src": "ws", "recv": 9321.747324791, "lt": 9321.747125939999, "tt": 3.5896}
+{"stage": "asr_final", "t": 9322.76381532, "pid": 21907, "text": "What kind of movies do you think I would like?", "src": "ws", "recv": 9322.764632133, "lt": 9322.764632133, "tt": 4.6071}
+{"stage": "llm_request", "t": 9322.765696076, "pid": 21907, "messages": 3, "chars": 191, "est_tokens": 48, "src": "ws", "recv": 9322.770237475, "lt": 9322.766512888998, "tt": 4.609}
+{"stage": "user_stopped", "t": 9322.765716613, "pid": 21907, "src": "ws", "recv": 9322.770261049, "lt": 9322.766533425998, "tt": 4.609}
+{"stage": "user_stopped", "t": 9322.765726909, "pid": 21907, "src": "ws", "recv": 9322.770274475, "lt": 9322.766543721998, "tt": 4.609}
+{"stage": "llm_first_token", "t": 9323.305289248, "pid": 21907, "src": "ws", "recv": 9323.311083053, "lt": 9323.306106060998, "tt": 5.1486}
+{"stage": "tts_request", "t": 9323.324670769, "pid": 21907, "src": "ws", "recv": 9323.330528666, "lt": 9323.325487581998, "tt": 5.1679}
+{"stage": "tts_first_audio", "t": 9323.584480874, "pid": 21907, "src": "ws", "recv": 9323.586989925, "lt": 9323.585297687, "tt": 5.4277}
+{"stage": "audio_out", "t": 9323.589534124, "pid": 21907, "src": "ws", "recv": 9323.592206101, "lt": 9323.590350936998, "tt": 5.4328}
+{"stage": "audio_out", "t": 9323.589566716, "pid": 21907, "src": "ws", "recv": 9323.592406045, "lt": 9323.590383529, "tt": 5.4328}
+{"stage": "bot_stopped", "t": 9328.271381489, "pid": 21907, "src": "ws", "recv": 9328.273726577, "lt": 9328.272198301998, "tt": 10.1146}
+{"stage": "bot_stopped", "t": 9328.271420507, "pid": 21907, "src": "ws", "recv": 9328.273850059, "lt": 9328.27223732, "tt": 10.1147}
+{"stage": "llm_request", "t": 9328.273847373, "pid": 21907, "messages": 4, "chars": 302, "est_tokens": 76, "src": "ws", "recv": 9328.275318278, "lt": 9328.274664186, "tt": 10.1171}

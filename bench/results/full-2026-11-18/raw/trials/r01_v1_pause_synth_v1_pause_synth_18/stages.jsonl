@@ -1,0 +1,52 @@
+{"stage": "vad_start", "t": 9819.601064891, "pid": 21907, "src": "ws", "recv": 9819.691958026, "lt": 9819.601659409, "tt": 0.5161}
+{"stage": "vad_start", "t": 9819.601089688, "pid": 21907, "src": "ws", "recv": 9819.691988933, "lt": 9819.601684206, "tt": 0.5161}
+{"stage": "vad_start", "t": 9819.690316026, "pid": 21907, "src": "ws", "recv": 9819.692865489, "lt": 9819.690910544, "tt": 0.6053}
+{"stage": "vad_start", "t": 9819.690377508, "pid": 21907, "src": "ws", "recv": 9819.692885637, "lt": 9819.690972026001, "tt": 0.6054}
+{"stage": "interrupted", "t": 9819.690446359, "pid": 21907, "src": "ws", "recv": 9819.692970989, "lt": 9819.691040877, "tt": 0.6055}
+{"stage": "interrupted", "t": 9819.6904706, "pid": 21907, "src": "ws", "recv": 9819.692989229, "lt": 9819.691065118, "tt": 0.6055}
+{"stage": "asr_partial", "t": 9820.07832369, "pid": 21907, "text": "And look", "src": "ws", "recv": 9820.082096171, "lt": 9820.078918208, "tt": 0.9934}
+{"stage": "asr_partial", "t": 9820.39808244, "pid": 21907, "text": "And looking for", "src": "ws", "recv": 9820.400364902, "lt": 9820.398676958, "tt": 1.3131}
+{"stage": "asr_partial", "t": 9820.717807837, "pid": 21907, "text": "And looking for a nice", "src": "ws", "recv": 9820.721052281, "lt": 9820.718402355, "tt": 1.6328}
+{"stage": "asr_partial", "t": 9821.037661697, "pid": 21907, "text": "And looking for a nice place to e", "src": "ws", "recv": 9821.039570234, "lt": 9821.038256215, "tt": 1.9527}
+{"stage": "asr_partial", "t": 9821.357346743, "pid": 21907, "text": "And looking for a nice place to eat", "src": "ws", "recv": 9821.358580298, "lt": 9821.357941261, "tt": 2.2724}
+{"stage": "asr_partial", "t": 9821.677664456, "pid": 21907, "text": "And looking for a nice place to eat to night", "src": "ws", "recv": 9821.679814789, "lt": 9821.678258974, "tt": 2.5927}
+{"stage": "asr_partial", "t": 9821.997377835, "pid": 21907, "text": "And looking for a nice place to eat to night i", "src": "ws", "recv": 9821.999328798, "lt": 9821.997972353, "tt": 2.9124}
+{"stage": "asr_partial", "t": 9822.317373604, "pid": 21907, "text": "And looking for a nice place to eat to night i heard", "src": "ws", "recv": 9822.320385678, "lt": 9822.317968122, "tt": 3.2324}
+{"stage": "asr_partial", "t": 9822.640942743, "pid": 21907, "text": "And looking for a nice place to eat to night i heard about this", "src": "ws", "recv": 9822.642379335, "lt": 9822.641537261, "tt": 3.556}
+{"stage": "asr_partial", "t": 9822.960812956, "pid": 21907, "text": "And looking for a nice place to eat to night i heard about this new", "src": "ws", "recv": 9822.962090696, "lt": 9822.961407474, "tt": 3.8758}
+{"stage": "asr_partial", "t": 9823.278984522, "pid": 21907, "text": "And looking for a nice place to eat to night i heard about this new ital", "src": "ws", "recv": 9823.281144651, "lt": 9823.27957904, "tt": 4.194}
+{"stage": "asr_partial", "t": 9823.598117495, "pid": 21907, "text": "And looking for a nice place to eat to night i heard about this new italian", "src": "ws", "recv": 9823.602156846, "lt": 9823.598712013, "tt": 4.5132}
+{"stage": "asr_partial", "t": 9823.917963783, "pid": 21907, "text": "And looking for a nice place to eat to night i heard about this new italian place", "src": "ws", "recv": 9823.919899227, "lt": 9823.918558301, "tt": 4.833}
+{"stage": "asr_partial", "t": 9824.237425516, "pid": 21907, "text": "And looking for a nice place to eat to night i heard about this new italian place that", "src": "ws", "recv": 9824.238719201, "lt": 9824.238020034, "tt": 5.1525}
+{"stage": "asr_partial", "t": 9824.557626231, "pid": 21907, "text": "And looking for a nice place to eat to night i heard about this new italian place that serves", "src": "ws", "recv": 9824.564066452, "lt": 9824.558220749, "tt": 5.4727}
+{"stage": "asr_partial", "t": 9825.198140308, "pid": 21907, "text": "And looking for a nice place to eat to night i heard about this new italian place that serves had a", "src": "ws", "recv": 9825.201601011, "lt": 9825.198734826, "tt": 6.1132}
+{"stage": "asr_partial", "t": 9825.517688838, "pid": 21907, "text": "And looking for a nice place to eat to night i heard about this new italian place that serves had a but", "src": "ws", "recv": 9825.519867227, "lt": 9825.518283356, "tt": 6.4327}
+{"stage": "vad_end", "t": 9825.711890997, "pid": 21907, "src": "ws", "recv": 9825.713580052, "lt": 9825.712485515, "tt": 6.6269}
+{"stage": "vad_end", "t": 9825.711974219, "pid": 21907, "src": "ws", "recv": 9825.713686144, "lt": 9825.712568737, "tt": 6.627}
+{"stage": "vad_end", "t": 9825.714287626, "pid": 21907, "src": "ws", "recv": 9825.715389052, "lt": 9825.714882144, "tt": 6.6293}
+{"stage": "vad_end", "t": 9825.71439157, "pid": 21907, "src": "ws", "recv": 9825.715447607, "lt": 9825.714986088, "tt": 6.6294}
+{"stage": "vad_start", "t": 9826.072307447, "pid": 21907, "src": "ws", "recv": 9826.07332291, "lt": 9826.072901965, "tt": 6.9873}
+{"stage": "vad_start", "t": 9826.072331651, "pid": 21907, "src": "ws", "recv": 9826.073470577, "lt": 9826.072926169, "tt": 6.9874}
+{"stage": "vad_start", "t": 9826.072374669, "pid": 21907, "src": "ws", "recv": 9826.073590058, "lt": 9826.072969187, "tt": 6.9874}
+{"stage": "vad_start", "t": 9826.07239978, "pid": 21907, "src": "ws", "recv": 9826.073718317, "lt": 9826.072994298, "tt": 6.9874}
+{"stage": "asr_partial", "t": 9826.564516602, "pid": 21907, "text": "The incr", "src": "ws", "recv": 9826.568163361, "lt": 9826.56511112, "tt": 7.4795}
+{"stage": "asr_partial", "t": 9826.895262798, "pid": 21907, "text": "The incredible", "src": "ws", "recv": 9826.89638152, "lt": 9826.895857316, "tt": 7.8103}
+{"stage": "asr_partial", "t": 9827.211195459, "pid": 21907, "text": "The incredible apost", "src": "ws", "recv": 9827.219467366, "lt": 9827.211789977, "tt": 8.1262}
+{"stage": "asr_final", "t": 9827.350027848, "pid": 21907, "text": "I'm looking for a nice place to eat tonight. I heard about this new Italian place that serves kind of butt.", "src": "ws", "recv": 9827.350904107, "lt": 9827.350622366, "tt": 8.2651}
+{"stage": "asr_partial", "t": 9827.501921772, "pid": 21907, "text": "The incredible apostor dishe", "src": "ws", "recv": 9827.503672309, "lt": 9827.50251629, "tt": 8.417}
+{"stage": "vad_end", "t": 9827.760048886, "pid": 21907, "src": "ws", "recv": 9827.79382953, "lt": 9827.760643404, "tt": 8.6751}
+{"stage": "vad_end", "t": 9827.760132312, "pid": 21907, "src": "ws", "recv": 9827.79604714, "lt": 9827.76072683, "tt": 8.6752}
+{"stage": "vad_end", "t": 9827.794535418, "pid": 21907, "src": "ws", "recv": 9827.797331362, "lt": 9827.795129936, "tt": 8.7096}
+{"stage": "vad_end", "t": 9827.794565529, "pid": 21907, "src": "ws", "recv": 9827.797348103, "lt": 9827.795160047, "tt": 8.7096}
+{"stage": "llm_request", "t": 9828.801196007, "pid": 21907, "messages": 61, "chars": 4496, "est_tokens": 1124, "src": "ws", "recv": 9828.828665781, "lt": 9828.801790525, "tt": 9.7162}
+{"stage": "user_stopped", "t": 9828.801226489, "pid": 21907, "src": "ws", "recv": 9828.8288898, "lt": 9828.801821007, "tt": 9.7163}
+{"stage": "user_stopped", "t": 9828.801237137, "pid": 21907, "src": "ws", "recv": 9828.82906317, "lt": 9828.801831655, "tt": 9.7163}
+{"stage": "llm_first_token", "t": 9829.306237682, "pid": 21907, "src": "ws", "recv": 9829.309713589, "lt": 9829.3068322, "tt": 10.2213}
+{"stage": "tts_request", "t": 9829.336016826, "pid": 21907, "src": "ws", "recv": 9829.337815956, "lt": 9829.336611344, "tt": 10.251}
+{"stage": "tts_first_audio", "t": 9829.864356258, "pid": 21907, "src": "ws", "recv": 9829.883343663, "lt": 9829.864950776, "tt": 10.7794}
+{"stage": "audio_out", "t": 9829.881904644, "pid": 21907, "src": "ws", "recv": 9829.886332662, "lt": 9829.882499162, "tt": 10.7969}
+{"stage": "audio_out", "t": 9829.881934829, "pid": 21907, "src": "ws", "recv": 9829.886361625, "lt": 9829.882529347, "tt": 10.797}
+{"stage": "asr_final", "t": 9833.975108891, "pid": 21907, "text": "incredible post edition.", "src": "ws", "recv": 9833.975903057, "lt": 9833.975703409, "tt": 14.8901}
+{"stage": "bot_stopped", "t": 9835.203670947, "pid": 21907, "src": "ws", "recv": 9835.20496878, "lt": 9835.204265465, "tt": 16.1187}
+{"stage": "bot_stopped", "t": 9835.203694002, "pid": 21907, "src": "ws", "recv": 9835.205019539, "lt": 9835.20428852, "tt": 16.1187}
+{"stage": "llm_request", "t": 9835.205040632, "pid": 21907, "messages": 62, "chars": 4617, "est_tokens": 1154, "src": "ws", "recv": 9835.205924946, "lt": 9835.20563515, "tt": 16.1201}

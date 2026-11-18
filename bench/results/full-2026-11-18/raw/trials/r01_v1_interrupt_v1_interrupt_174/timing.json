@@ -1,0 +1,82 @@
+{
+  "trial": "r01_v1_interrupt_v1_interrupt_174",
+  "group": "v1_interrupt",
+  "clip": "v1_interrupt_174",
+  "variant": "main",
+  "expected": "stop, then answer the new request",
+  "duration": 16.768,
+  "events": [
+    {
+      "name": "first",
+      "t": 0.0,
+      "len": 2.464
+    },
+    {
+      "name": "overlap",
+      "t": 7.388,
+      "len": 2.485375
+    }
+  ],
+  "live_bot_starts": [
+    5.888,
+    12.256
+  ],
+  "live_bot_ends": [
+    8.352,
+    15.552
+  ],
+  "rig": {
+    "rig": "direct",
+    "her_out_sr": 16000,
+    "clears": 2
+  },
+  "clip_meta": {
+    "context_text": "How can I protect my online accounts?",
+    "interrupt_text": "Actually, can we talk about online shopping instead?",
+    "source_id": "174"
+  },
+  "mono": [
+    10072.697267802,
+    10089.455970155
+  ],
+  "bot_segments": [
+    [
+      5.858,
+      8.382
+    ],
+    [
+      12.226,
+      15.582
+    ]
+  ],
+  "play_first": [
+    0.0,
+    2.464
+  ],
+  "overlap_played": true,
+  "t_stop": 0.476,
+  "t_resp": 2.3526250000000015,
+  "bot_speaking_at_onset": true,
+  "spoke_through": false,
+  "overlap": [
+    7.906,
+    9.873375
+  ],
+  "tor": 1,
+  "first_start": 12.226,
+  "spoke_s": 3.356,
+  "latency": 2.3526250000000015,
+  "actual": "stopped after 0.48 s, back 2.35 s after",
+  "verdict": "✓ yielded, 2.35 s",
+  "ok": true,
+  "marks": 57,
+  "final": {
+    "tor": 1,
+    "words": null,
+    "latency": 2.3526250000000015,
+    "t_stop": 0.476,
+    "verdict": "✓ yielded, 2.35 s",
+    "ok": true
+  },
+  "scored_at": "2026-11-18T18:40:29+08:00"
+}

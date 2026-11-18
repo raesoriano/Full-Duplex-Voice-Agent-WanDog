@@ -1,0 +1,29 @@
+{"stage": "vad_start", "t": 9456.465197596, "pid": 21907, "src": "ws", "recv": 9456.554437841, "lt": 9456.465801761, "tt": 0.5163}
+{"stage": "vad_start", "t": 9456.465223299, "pid": 21907, "src": "ws", "recv": 9456.554461248, "lt": 9456.465827463999, "tt": 0.5163}
+{"stage": "vad_start", "t": 9456.553160157, "pid": 21907, "src": "ws", "recv": 9456.555078655, "lt": 9456.553764322, "tt": 0.6042}
+{"stage": "vad_start", "t": 9456.55320649, "pid": 21907, "src": "ws", "recv": 9456.555136933, "lt": 9456.553810655, "tt": 0.6043}
+{"stage": "interrupted", "t": 9456.553254768, "pid": 21907, "src": "ws", "recv": 9456.555195562, "lt": 9456.553858932999, "tt": 0.6043}
+{"stage": "interrupted", "t": 9456.553271546, "pid": 21907, "src": "ws", "recv": 9456.555207525, "lt": 9456.553875710999, "tt": 0.6043}
+{"stage": "asr_partial", "t": 9456.94216184, "pid": 21907, "text": "How can i", "src": "ws", "recv": 9456.943381746, "lt": 9456.942766004999, "tt": 0.9932}
+{"stage": "asr_partial", "t": 9457.26226607, "pid": 21907, "text": "How can i trade", "src": "ws", "recv": 9457.26529003, "lt": 9457.262870235, "tt": 1.3133}
+{"stage": "asr_partial", "t": 9457.582041745, "pid": 21907, "text": "How can i trade my dog", "src": "ws", "recv": 9457.583333836, "lt": 9457.582645909999, "tt": 1.6331}
+{"stage": "asr_partial", "t": 9457.901516513, "pid": 21907, "text": "How can i trade my dog to follow", "src": "ws", "recv": 9457.904894823, "lt": 9457.902120678, "tt": 1.9526}
+{"stage": "asr_partial", "t": 9458.221951151, "pid": 21907, "text": "How can i trade my dog to follow base", "src": "ws", "recv": 9458.223284556, "lt": 9458.222555315999, "tt": 2.273}
+{"stage": "asr_partial", "t": 9458.542027437, "pid": 21907, "text": "How can i trade my dog to follow base a com", "src": "ws", "recv": 9458.543305843, "lt": 9458.542631602, "tt": 2.5931}
+{"stage": "asr_partial", "t": 9458.862422872, "pid": 21907, "text": "How can i trade my dog to follow base a commands", "src": "ws", "recv": 9458.863631296, "lt": 9458.863027037, "tt": 2.9135}
+{"stage": "vad_end", "t": 9458.959942923, "pid": 21907, "src": "ws", "recv": 9458.961458403, "lt": 9458.960547088, "tt": 3.011}
+{"stage": "vad_end", "t": 9458.960026978, "pid": 21907, "src": "ws", "recv": 9458.961511384, "lt": 9458.960631143, "tt": 3.0111}
+{"stage": "vad_end", "t": 9458.962204291, "pid": 21907, "src": "ws", "recv": 9458.963113845, "lt": 9458.962808455999, "tt": 3.0133}
+{"stage": "vad_end", "t": 9458.962284124, "pid": 21907, "src": "ws", "recv": 9458.963182419, "lt": 9458.962888289, "tt": 3.0133}
+{"stage": "asr_final", "t": 9459.944227629, "pid": 21907, "text": "How can I train my dog to follow basic commands?", "src": "ws", "recv": 9459.945060776, "lt": 9459.944831793999, "tt": 3.9953}
+{"stage": "llm_request", "t": 9459.965187937, "pid": 21907, "messages": 19, "chars": 1354, "est_tokens": 338, "src": "ws", "recv": 9459.972068392, "lt": 9459.965792101999, "tt": 4.0162}
+{"stage": "user_stopped", "t": 9459.96520866, "pid": 21907, "src": "ws", "recv": 9459.97215654, "lt": 9459.965812825, "tt": 4.0163}
+{"stage": "user_stopped", "t": 9459.965219234, "pid": 21907, "src": "ws", "recv": 9459.972170263, "lt": 9459.965823399, "tt": 4.0163}
+{"stage": "llm_first_token", "t": 9461.096819122, "pid": 21907, "src": "ws", "recv": 9461.098703305, "lt": 9461.097423287, "tt": 5.1479}
+{"stage": "tts_request", "t": 9461.160744695, "pid": 21907, "src": "ws", "recv": 9461.162965859, "lt": 9461.16134886, "tt": 5.2118}
+{"stage": "tts_first_audio", "t": 9461.664571918, "pid": 21907, "src": "ws", "recv": 9461.668530339, "lt": 9461.665176083, "tt": 5.7156}
+{"stage": "audio_out", "t": 9461.669266746, "pid": 21907, "src": "ws", "recv": 9461.684022747, "lt": 9461.669870910999, "tt": 5.7203}
+{"stage": "audio_out", "t": 9461.669290172, "pid": 21907, "src": "ws", "recv": 9461.684045636, "lt": 9461.669894337, "tt": 5.7203}
+{"stage": "bot_stopped", "t": 9468.351852933, "pid": 21907, "src": "ws", "recv": 9468.353737301, "lt": 9468.352457097999, "tt": 12.4029}
+{"stage": "bot_stopped", "t": 9468.351885692, "pid": 21907, "src": "ws", "recv": 9468.353839319, "lt": 9468.352489857, "tt": 12.4029}
+{"stage": "llm_request", "t": 9468.353732431, "pid": 21907, "messages": 20, "chars": 1499, "est_tokens": 375, "src": "ws", "recv": 9468.354873411, "lt": 9468.354336596, "tt": 12.4048}

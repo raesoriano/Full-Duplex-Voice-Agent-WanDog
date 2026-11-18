@@ -1,0 +1,83 @@
+{
+  "trial": "r01_stage_latency_phrase_v15_backchannel_7",
+  "group": "stage_latency",
+  "clip": "phrase_v15_backchannel_7",
+  "variant": "main",
+  "expected": "answer the phrase",
+  "duration": 13.792,
+  "events": [
+    {
+      "name": "first",
+      "t": 0.0,
+      "len": 2.52
+    }
+  ],
+  "live_bot_starts": [
+    4.992
+  ],
+  "live_bot_ends": [
+    13.44
+  ],
+  "rig": {
+    "rig": "direct",
+    "her_out_sr": 16000,
+    "clears": 1
+  },
+  "clip_meta": {
+    "text": "Give a detailed introduction to the stock market.",
+    "source": "v15_backchannel_7"
+  },
+  "mono": [
+    9364.456122892,
+    9378.224506051
+  ],
+  "bot_segments": [
+    [
+      4.962,
+      13.47
+    ]
+  ],
+  "play_first": [
+    0.0,
+    2.52
+  ],
+  "tor": 1,
+  "first_start": 4.962,
+  "spoke_s": 5.558,
+  "user_end": 2.27,
+  "latency": 2.6919999999999997,
+  "actual": "replied 2.69 s after speech end",
+  "verdict": "✓ 2.69 s",
+  "ok": true,
+  "marks": 29,
+  "final": {
+    "stages": {
+      "e2e_heard": 2.692,
+      "e2e": 2.0163,
+      "e2e_source": "marks",
+      "asr_final": 0.9695,
+      "llm_ttft": 0.5154,
+      "tts_ttfb": 0.4814,
+      "endpointing": 0.6472,
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ],
+      "transcript": "Give a detailed introduction to the stock market.",
+      "wer": {
+        "ref_words": 8,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "context_tokens": 131,
+      "context_source": "estimate",
+      "context_messages": 9
+    }
+  },
+  "scored_at": "2026-11-18T18:40:29+08:00"
+}

@@ -1,0 +1,37 @@
+{"stage": "vad_start", "t": 9918.289098075, "pid": 21907, "src": "ws", "recv": 9918.373565447, "lt": 9918.289692593, "tt": 0.4201}
+{"stage": "vad_start", "t": 9918.289122815, "pid": 21907, "src": "ws", "recv": 9918.37359267, "lt": 9918.289717333, "tt": 0.4202}
+{"stage": "vad_start", "t": 9918.372029133, "pid": 21907, "src": "ws", "recv": 9918.374361614, "lt": 9918.372623651, "tt": 0.5031}
+{"stage": "vad_start", "t": 9918.372089151, "pid": 21907, "src": "ws", "recv": 9918.374380225, "lt": 9918.372683669, "tt": 0.5031}
+{"stage": "interrupted", "t": 9918.37215141, "pid": 21907, "src": "ws", "recv": 9918.374394022, "lt": 9918.372745928, "tt": 0.5032}
+{"stage": "interrupted", "t": 9918.37217241, "pid": 21907, "src": "ws", "recv": 9918.374458744, "lt": 9918.372766928, "tt": 0.5032}
+{"stage": "asr_partial", "t": 9918.766002829, "pid": 21907, "text": "There", "src": "ws", "recv": 9918.769319755, "lt": 9918.766597347, "tt": 0.897}
+{"stage": "asr_partial", "t": 9919.08603232, "pid": 21907, "text": "There still", "src": "ws", "recv": 9919.08802369, "lt": 9919.086626838, "tt": 1.2171}
+{"stage": "asr_partial", "t": 9919.406107033, "pid": 21907, "text": "There still go", "src": "ws", "recv": 9919.407498366, "lt": 9919.406701551, "tt": 1.5371}
+{"stage": "asr_partial", "t": 9919.729417172, "pid": 21907, "text": "There still going strong", "src": "ws", "recv": 9919.731332117, "lt": 9919.73001169, "tt": 1.8605}
+{"stage": "asr_partial", "t": 9920.045884719, "pid": 21907, "text": "There still going strong because", "src": "ws", "recv": 9920.047974608, "lt": 9920.046479237, "tt": 2.1769}
+{"stage": "asr_partial", "t": 9921.006700027, "pid": 21907, "text": "There still going strong because i thank", "src": "ws", "recv": 9921.008897657, "lt": 9921.007294545, "tt": 3.1377}
+{"stage": "asr_partial", "t": 9921.325655019, "pid": 21907, "text": "There still going strong because i thank every", "src": "ws", "recv": 9921.326818112, "lt": 9921.326249537, "tt": 3.4567}
+{"stage": "asr_partial", "t": 9921.646701697, "pid": 21907, "text": "There still going strong because i thank every thing's going", "src": "ws", "recv": 9921.650332623, "lt": 9921.647296215, "tt": 3.7777}
+{"stage": "asr_partial", "t": 9921.966518855, "pid": 21907, "text": "There still going strong because i thank every thing's going to be", "src": "ws", "recv": 9921.968462244, "lt": 9921.967113373, "tt": 4.0976}
+{"stage": "asr_partial", "t": 9922.286522126, "pid": 21907, "text": "There still going strong because i thank every thing's going to be on li", "src": "ws", "recv": 9922.287699404, "lt": 9922.287116644, "tt": 4.4176}
+{"stage": "asr_partial", "t": 9922.6063766, "pid": 21907, "text": "There still going strong because i thank every thing's going to be on lines so", "src": "ws", "recv": 9922.608425192, "lt": 9922.606971118, "tt": 4.7374}
+{"stage": "asr_partial", "t": 9922.926551648, "pid": 21907, "text": "There still going strong because i thank every thing's going to be on lines so they may", "src": "ws", "recv": 9922.927926759, "lt": 9922.927146166001, "tt": 5.0576}
+{"stage": "asr_partial", "t": 9923.247590086, "pid": 21907, "text": "There still going strong because i thank every thing's going to be on lines so they may even get", "src": "ws", "recv": 9923.248756641, "lt": 9923.248184604001, "tt": 5.3786}
+{"stage": "asr_partial", "t": 9923.576597746, "pid": 21907, "text": "There still going strong because i thank every thing's going to be on lines so they may even get more", "src": "ws", "recv": 9923.579763283, "lt": 9923.577192264, "tt": 5.7076}
+{"stage": "asr_partial", "t": 9923.88626335, "pid": 21907, "text": "There still going strong because i thank every thing's going to be on lines so they may even get more work", "src": "ws", "recv": 9923.887487424, "lt": 9923.886857868, "tt": 6.0173}
+{"stage": "vad_end", "t": 9924.111848173, "pid": 21907, "src": "ws", "recv": 9924.113592228, "lt": 9924.112442691001, "tt": 6.2429}
+{"stage": "vad_end", "t": 9924.111920377, "pid": 21907, "src": "ws", "recv": 9924.11367884, "lt": 9924.112514895, "tt": 6.243}
+{"stage": "vad_end", "t": 9924.114432729, "pid": 21907, "src": "ws", "recv": 9924.115568451, "lt": 9924.115027247, "tt": 6.2455}
+{"stage": "vad_end", "t": 9924.114542525, "pid": 21907, "src": "ws", "recv": 9924.115610877, "lt": 9924.115137043, "tt": 6.2456}
+{"stage": "asr_final", "t": 9925.353394869, "pid": 21907, "text": "They're still going strong because everything's going to be online so they may even get more work.", "src": "ws", "recv": 9925.354195962, "lt": 9925.353989387, "tt": 7.4844}
+{"stage": "llm_request", "t": 9925.355255573, "pid": 21907, "messages": 74, "chars": 5323, "est_tokens": 1331, "src": "ws", "recv": 9925.372818499, "lt": 9925.355850091, "tt": 7.4863}
+{"stage": "user_stopped", "t": 9925.355275332, "pid": 21907, "src": "ws", "recv": 9925.37287887, "lt": 9925.35586985, "tt": 7.4863}
+{"stage": "user_stopped", "t": 9925.355285906, "pid": 21907, "src": "ws", "recv": 9925.372893203, "lt": 9925.355880424, "tt": 7.4863}
+{"stage": "llm_first_token", "t": 9925.823332499, "pid": 21907, "src": "ws", "recv": 9925.823977276, "lt": 9925.823927017, "tt": 7.9544}
+{"stage": "tts_request", "t": 9925.862505556, "pid": 21907, "src": "ws", "recv": 9925.869613204, "lt": 9925.863100074, "tt": 7.9935}
+{"stage": "tts_first_audio", "t": 9926.147360197, "pid": 21907, "src": "ws", "recv": 9926.150860975, "lt": 9926.147954715, "tt": 8.2784}
+{"stage": "audio_out", "t": 9926.156741216, "pid": 21907, "src": "ws", "recv": 9926.159749994, "lt": 9926.157335734, "tt": 8.2878}
+{"stage": "audio_out", "t": 9926.15677192, "pid": 21907, "src": "ws", "recv": 9926.159768679, "lt": 9926.157366438, "tt": 8.2878}
+{"stage": "bot_stopped", "t": 9929.478553638, "pid": 21907, "src": "ws", "recv": 9929.48016586, "lt": 9929.479148156, "tt": 11.6096}
+{"stage": "bot_stopped", "t": 9929.478588379, "pid": 21907, "src": "ws", "recv": 9929.480266435, "lt": 9929.479182897, "tt": 11.6096}
+{"stage": "llm_request", "t": 9929.480305083, "pid": 21907, "messages": 75, "chars": 5406, "est_tokens": 1352, "src": "ws", "recv": 9929.572488105, "lt": 9929.480899601, "tt": 11.6113}

@@ -1,0 +1,29 @@
+{"stage": "vad_start", "t": 9755.985070289, "pid": 21907, "src": "ws", "recv": 9756.080244595, "lt": 9755.985664807, "tt": 0.3561}
+{"stage": "vad_start", "t": 9755.985122678, "pid": 21907, "src": "ws", "recv": 9756.080275447, "lt": 9755.985717196, "tt": 0.3562}
+{"stage": "vad_start", "t": 9756.076340374, "pid": 21907, "src": "ws", "recv": 9756.080292818, "lt": 9756.076934892, "tt": 0.4474}
+{"stage": "vad_start", "t": 9756.076402263, "pid": 21907, "src": "ws", "recv": 9756.080308447, "lt": 9756.076996781, "tt": 0.4475}
+{"stage": "interrupted", "t": 9756.076473189, "pid": 21907, "src": "ws", "recv": 9756.080323206, "lt": 9756.077067707, "tt": 0.4475}
+{"stage": "interrupted", "t": 9756.076497819, "pid": 21907, "src": "ws", "recv": 9756.080338262, "lt": 9756.077092337, "tt": 0.4475}
+{"stage": "asr_partial", "t": 9756.192245823, "pid": 21907, "text": "What", "src": "ws", "recv": 9756.193905045, "lt": 9756.192840341, "tt": 0.5633}
+{"stage": "asr_partial", "t": 9756.462257636, "pid": 21907, "text": "What's the", "src": "ws", "recv": 9756.463625506, "lt": 9756.462852154, "tt": 0.8333}
+{"stage": "asr_partial", "t": 9756.781992194, "pid": 21907, "text": "What's the stock", "src": "ws", "recv": 9756.785139656, "lt": 9756.782586712001, "tt": 1.153}
+{"stage": "asr_partial", "t": 9757.102068215, "pid": 21907, "text": "What's the stock price of", "src": "ws", "recv": 9757.104088825, "lt": 9757.102662733, "tt": 1.4731}
+{"stage": "asr_partial", "t": 9757.421726218, "pid": 21907, "text": "What's the stock price of tessel", "src": "ws", "recv": 9757.423005699, "lt": 9757.422320736, "tt": 1.7928}
+{"stage": "asr_partial", "t": 9757.741520573, "pid": 21907, "text": "What's the stock price of tessel right", "src": "ws", "recv": 9757.744414072, "lt": 9757.742115091, "tt": 2.1126}
+{"stage": "asr_partial", "t": 9758.06151865, "pid": 21907, "text": "What's the stock price of tessel right now", "src": "ws", "recv": 9758.062727335, "lt": 9758.062113168, "tt": 2.4326}
+{"stage": "vad_end", "t": 9758.255989003, "pid": 21907, "src": "ws", "recv": 9758.257546762, "lt": 9758.256583521, "tt": 2.627}
+{"stage": "vad_end", "t": 9758.256086189, "pid": 21907, "src": "ws", "recv": 9758.257599707, "lt": 9758.256680707, "tt": 2.6271}
+{"stage": "vad_end", "t": 9758.258292392, "pid": 21907, "src": "ws", "recv": 9758.259200502, "lt": 9758.25888691, "tt": 2.6293}
+{"stage": "vad_end", "t": 9758.258375317, "pid": 21907, "src": "ws", "recv": 9758.259267465, "lt": 9758.258969835, "tt": 2.6294}
+{"stage": "asr_final", "t": 9759.239975731, "pid": 21907, "text": "What's the stock price of Tesla right now?", "src": "ws", "recv": 9759.240817971, "lt": 9759.240570249, "tt": 3.611}
+{"stage": "llm_request", "t": 9759.261177947, "pid": 21907, "messages": 53, "chars": 3954, "est_tokens": 988, "src": "ws", "recv": 9759.274289795, "lt": 9759.261772465, "tt": 3.6322}
+{"stage": "user_stopped", "t": 9759.261199373, "pid": 21907, "src": "ws", "recv": 9759.274348777, "lt": 9759.261793891, "tt": 3.6322}
+{"stage": "user_stopped", "t": 9759.261210058, "pid": 21907, "src": "ws", "recv": 9759.274362017, "lt": 9759.261804576001, "tt": 3.6323}
+{"stage": "llm_first_token", "t": 9759.753371126, "pid": 21907, "src": "ws", "recv": 9759.754025663, "lt": 9759.753965644, "tt": 4.1244}
+{"stage": "tts_request", "t": 9759.870414557, "pid": 21907, "src": "ws", "recv": 9759.871192279, "lt": 9759.871009075, "tt": 4.2415}
+{"stage": "tts_first_audio", "t": 9760.247693546, "pid": 21907, "src": "ws", "recv": 9760.251724249, "lt": 9760.248288064, "tt": 4.6187}
+{"stage": "audio_out", "t": 9760.252474804, "pid": 21907, "src": "ws", "recv": 9760.254311581, "lt": 9760.253069322, "tt": 4.6235}
+{"stage": "audio_out", "t": 9760.252498749, "pid": 21907, "src": "ws", "recv": 9760.254448026, "lt": 9760.253093267, "tt": 4.6235}
+{"stage": "bot_stopped", "t": 9763.295523444, "pid": 21907, "src": "ws", "recv": 9763.29718937, "lt": 9763.296117962, "tt": 7.6666}
+{"stage": "bot_stopped", "t": 9763.295556426, "pid": 21907, "src": "ws", "recv": 9763.297291351, "lt": 9763.296150944, "tt": 7.6666}
+{"stage": "llm_request", "t": 9763.297290351, "pid": 21907, "messages": 54, "chars": 4018, "est_tokens": 1004, "src": "ws", "recv": 9763.298467221, "lt": 9763.297884869, "tt": 7.6683}

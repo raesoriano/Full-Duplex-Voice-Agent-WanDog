@@ -1,0 +1,80 @@
+{"stage": "vad_start", "t": 9937.490118521, "pid": 21907, "src": "ws", "recv": 9937.5778886, "lt": 9937.490713039, "tt": 0.3892}
+{"stage": "vad_start", "t": 9937.490145984, "pid": 21907, "src": "ws", "recv": 9937.577918452, "lt": 9937.490740502, "tt": 0.3892}
+{"stage": "vad_start", "t": 9937.49021354, "pid": 21907, "src": "ws", "recv": 9937.577934638, "lt": 9937.490808058, "tt": 0.3893}
+{"stage": "vad_start", "t": 9937.490253373, "pid": 21907, "src": "ws", "recv": 9937.577949563, "lt": 9937.490847891, "tt": 0.3893}
+{"stage": "interrupted", "t": 9937.490324595, "pid": 21907, "src": "ws", "recv": 9937.577963415, "lt": 9937.490919113001, "tt": 0.3894}
+{"stage": "interrupted", "t": 9937.490349595, "pid": 21907, "src": "ws", "recv": 9937.57797723, "lt": 9937.490944113, "tt": 0.3894}
+{"stage": "asr_partial", "t": 9937.966472142, "pid": 21907, "text": "Sometim", "src": "ws", "recv": 9937.96767366, "lt": 9937.96706666, "tt": 0.8655}
+{"stage": "asr_partial", "t": 9938.28580192, "pid": 21907, "text": "Sometimes", "src": "ws", "recv": 9938.287080513, "lt": 9938.286396438, "tt": 1.1848}
+{"stage": "asr_partial", "t": 9938.605409403, "pid": 21907, "text": "Sometimes even you", "src": "ws", "recv": 9938.609641181, "lt": 9938.606003921, "tt": 1.5044}
+{"stage": "asr_partial", "t": 9938.926369237, "pid": 21907, "text": "Sometimes even you tried", "src": "ws", "recv": 9938.928406274, "lt": 9938.926963755, "tt": 1.8254}
+{"stage": "asr_partial", "t": 9939.248909275, "pid": 21907, "text": "Sometimes even you tried up", "src": "ws", "recv": 9939.250182831, "lt": 9939.249503793, "tt": 2.1479}
+{"stage": "asr_partial", "t": 9939.566235276, "pid": 21907, "text": "Sometimes even you tried up make", "src": "ws", "recv": 9939.567580591, "lt": 9939.566829794, "tt": 2.4653}
+{"stage": "asr_partial", "t": 9939.885955129, "pid": 21907, "text": "Sometimes even you tried up make sense of", "src": "ws", "recv": 9939.888277407, "lt": 9939.886549647, "tt": 2.785}
+{"stage": "asr_partial", "t": 9940.205672094, "pid": 21907, "text": "Sometimes even you tried up make sense of it", "src": "ws", "recv": 9940.207732964, "lt": 9940.206266612, "tt": 3.1047}
+{"stage": "asr_partial", "t": 9940.526327577, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any", "src": "ws", "recv": 9940.528541281, "lt": 9940.526922095, "tt": 3.4254}
+{"stage": "asr_partial", "t": 9940.846501412, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you", "src": "ws", "recv": 9940.849098005, "lt": 9940.84709593, "tt": 3.7455}
+{"stage": "asr_partial", "t": 9941.166351137, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest", "src": "ws", "recv": 9941.168583081, "lt": 9941.166945655, "tt": 4.0654}
+{"stage": "asr_partial", "t": 9941.48576712, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just", "src": "ws", "recv": 9941.487034195, "lt": 9941.486361638, "tt": 4.3848}
+{"stage": "asr_partial", "t": 9941.805629826, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just somet", "src": "ws", "recv": 9941.812834068, "lt": 9941.806224344, "tt": 4.7047}
+{"stage": "asr_partial", "t": 9942.126239403, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i", "src": "ws", "recv": 9942.127450866, "lt": 9942.126833921, "tt": 5.0253}
+{"stage": "asr_partial", "t": 9942.446385665, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came", "src": "ws", "recv": 9942.448508702, "lt": 9942.446980183, "tt": 5.3454}
+{"stage": "asr_partial", "t": 9942.777280743, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe", "src": "ws", "recv": 9942.784084576, "lt": 9942.777875261, "tt": 5.6763}
+{"stage": "asr_partial", "t": 9943.086332875, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what", "src": "ws", "recv": 9943.087690504, "lt": 9943.086927393, "tt": 5.9854}
+{"stage": "asr_partial", "t": 9943.406115656, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's", "src": "ws", "recv": 9943.407520582, "lt": 9943.406710174, "tt": 6.3052}
+{"stage": "asr_partial", "t": 9943.726759529, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what", "src": "ws", "recv": 9943.729779326, "lt": 9943.727354047, "tt": 6.6258}
+{"stage": "asr_partial", "t": 9944.046567699, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're go", "src": "ws", "recv": 9944.047862848, "lt": 9944.047162217, "tt": 6.9456}
+{"stage": "asr_partial", "t": 9944.366331648, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going", "src": "ws", "recv": 9944.367525018, "lt": 9944.366926166, "tt": 7.2654}
+{"stage": "asr_partial", "t": 9944.686547707, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the", "src": "ws", "recv": 9944.687993355, "lt": 9944.687142225, "tt": 7.5856}
+{"stage": "asr_partial", "t": 9945.0064796, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit", "src": "ws", "recv": 9945.012605489, "lt": 9945.007074118, "tt": 7.9055}
+{"stage": "asr_partial", "t": 9945.326950715, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit the moment", "src": "ws", "recv": 9945.329066789, "lt": 9945.327545233, "tt": 8.226}
+{"stage": "asr_partial", "t": 9945.647319849, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit the moment with", "src": "ws", "recv": 9945.656068664, "lt": 9945.647914367, "tt": 8.5464}
+{"stage": "asr_partial", "t": 9945.966513279, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit the moment with one", "src": "ws", "recv": 9945.967889187, "lt": 9945.967107797, "tt": 8.8656}
+{"stage": "asr_partial", "t": 9946.286845339, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit the moment with one thing", "src": "ws", "recv": 9946.290763321, "lt": 9946.287439857, "tt": 9.1859}
+{"stage": "asr_partial", "t": 9946.606095455, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit the moment with one thing and ain'", "src": "ws", "recv": 9946.607300548, "lt": 9946.606689973, "tt": 9.5051}
+{"stage": "asr_partial", "t": 9946.926468904, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit the moment with one thing and ain't another", "src": "ws", "recv": 9946.927751423, "lt": 9946.927063422, "tt": 9.8255}
+{"stage": "asr_partial", "t": 9947.249506114, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit the moment with one thing and ain't another thing", "src": "ws", "recv": 9947.252924281, "lt": 9947.250100632, "tt": 10.1485}
+{"stage": "asr_partial", "t": 9947.566416952, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit the moment with one thing and ain't another thing comes", "src": "ws", "recv": 9947.568139045, "lt": 9947.56701147, "tt": 10.4655}
+{"stage": "asr_partial", "t": 9947.895130902, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit the moment with one thing and ain't another thing comes you know", "src": "ws", "recv": 9947.897549995, "lt": 9947.89572542, "tt": 10.7942}
+{"stage": "asr_partial", "t": 9948.525695672, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit the moment with one thing and ain't another thing comes you know come", "src": "ws", "recv": 9948.527847598, "lt": 9948.52629019, "tt": 11.4247}
+{"stage": "asr_partial", "t": 9948.846230493, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit the moment with one thing and ain't another thing comes you know comes", "src": "ws", "recv": 9948.84949853, "lt": 9948.846825011, "tt": 11.7453}
+{"stage": "asr_partial", "t": 9949.166198517, "pid": 21907, "text": "Sometimes even you tried up make sense of it and any you jest you just sometimes i just came believe what's what we're going through at the unit the moment with one thing and ain't another thing comes you know comes about", "src": "ws", "recv": 9949.167424869, "lt": 9949.166793035, "tt": 12.0652}
+{"stage": "vad_end", "t": 9949.679980372, "pid": 21907, "src": "ws", "recv": 9949.681947039, "lt": 9949.68057489, "tt": 12.579}
+{"stage": "vad_end", "t": 9949.680077298, "pid": 21907, "src": "ws", "recv": 9949.682051243, "lt": 9949.680671816, "tt": 12.5791}
+{"stage": "vad_end", "t": 9949.682600039, "pid": 21907, "src": "ws", "recv": 9949.684051502, "lt": 9949.683194557, "tt": 12.5816}
+{"stage": "vad_end", "t": 9949.682836706, "pid": 21907, "src": "ws", "recv": 9949.684165354, "lt": 9949.683431224, "tt": 12.5819}
+{"stage": "vad_start", "t": 9950.391993428, "pid": 21907, "src": "ws", "recv": 9950.393695854, "lt": 9950.392587946, "tt": 13.291}
+{"stage": "vad_start", "t": 9950.392089909, "pid": 21907, "src": "ws", "recv": 9950.393797891, "lt": 9950.392684427, "tt": 13.2911}
+{"stage": "vad_start", "t": 9950.392115909, "pid": 21907, "src": "ws", "recv": 9950.393814576, "lt": 9950.392710427, "tt": 13.2912}
+{"stage": "vad_start", "t": 9950.392133946, "pid": 21907, "src": "ws", "recv": 9950.393826687, "lt": 9950.392728464, "tt": 13.2912}
+{"stage": "asr_partial", "t": 9950.884396689, "pid": 21907, "text": "I don", "src": "ws", "recv": 9950.885870689, "lt": 9950.884991207, "tt": 13.7834}
+{"stage": "asr_partial", "t": 9951.18748125, "pid": 21907, "text": "I don't know", "src": "ws", "recv": 9951.188967898, "lt": 9951.188075768, "tt": 14.0865}
+{"stage": "asr_partial", "t": 9951.534365426, "pid": 21907, "text": "I don't know i", "src": "ws", "recv": 9951.536288426, "lt": 9951.534959944, "tt": 14.4334}
+{"stage": "asr_final", "t": 9951.78006389, "pid": 21907, "text": "Sometimes you try to make sense of it and you just sometimes I just can't believe what's but we're going throughout the moment with one thing and then another thing comes you know comes about and...", "src": "ws", "recv": 9951.780901853, "lt": 9951.780658408, "tt": 14.6791}
+{"stage": "asr_partial", "t": 9951.821979857, "pid": 21907, "text": "I don't know i mean", "src": "ws", "recv": 9951.823479357, "lt": 9951.822574375, "tt": 14.721}
+{"stage": "vad_end", "t": 9952.141787309, "pid": 21907, "src": "ws", "recv": 9952.144323031, "lt": 9952.142381827, "tt": 15.0408}
+{"stage": "vad_end", "t": 9952.141810623, "pid": 21907, "src": "ws", "recv": 9952.144439605, "lt": 9952.142405141, "tt": 15.0408}
+{"stage": "vad_end", "t": 9952.149959106, "pid": 21907, "src": "ws", "recv": 9952.151552013, "lt": 9952.150553624, "tt": 15.049}
+{"stage": "vad_end", "t": 9952.153301902, "pid": 21907, "src": "ws", "recv": 9952.159140088, "lt": 9952.15389642, "tt": 15.0523}
+{"stage": "vad_start", "t": 9952.788373102, "pid": 21907, "src": "ws", "recv": 9952.790108714, "lt": 9952.78896762, "tt": 15.6874}
+{"stage": "vad_start", "t": 9952.78839525, "pid": 21907, "src": "ws", "recv": 9952.790137769, "lt": 9952.788989768, "tt": 15.6874}
+{"stage": "vad_start", "t": 9952.788438139, "pid": 21907, "src": "ws", "recv": 9952.793431121, "lt": 9952.789032657, "tt": 15.6875}
+{"stage": "vad_start", "t": 9952.788463676, "pid": 21907, "src": "ws", "recv": 9952.79345514, "lt": 9952.789058194001, "tt": 15.6875}
+{"stage": "asr_partial", "t": 9953.283626384, "pid": 21907, "text": "Which", "src": "ws", "recv": 9953.284841514, "lt": 9953.284220902, "tt": 16.1827}
+{"stage": "asr_final", "t": 9953.33211311, "pid": 21907, "text": "I don't know what I mean.", "src": "ws", "recv": 9953.33289224, "lt": 9953.332707628, "tt": 16.2312}
+{"stage": "vad_end", "t": 9953.48792279, "pid": 21907, "src": "ws", "recv": 9953.489281809, "lt": 9953.488517308, "tt": 16.387}
+{"stage": "vad_end", "t": 9953.488020735, "pid": 21907, "src": "ws", "recv": 9953.48935779, "lt": 9953.488615253, "tt": 16.3871}
+{"stage": "vad_end", "t": 9953.489999864, "pid": 21907, "src": "ws", "recv": 9953.490765383, "lt": 9953.490594382, "tt": 16.389}
+{"stage": "vad_end", "t": 9953.490075364, "pid": 21907, "src": "ws", "recv": 9953.490825846, "lt": 9953.490669882, "tt": 16.3891}
+{"stage": "asr_final", "t": 9954.308094303, "pid": 21907, "text": "Please.", "src": "ws", "recv": 9954.309761785, "lt": 9954.308688821, "tt": 17.2071}
+{"stage": "llm_request", "t": 9954.492739412, "pid": 21907, "messages": 76, "chars": 5638, "est_tokens": 1410, "src": "ws", "recv": 9954.510059284, "lt": 9954.49333393, "tt": 17.3918}
+{"stage": "user_stopped", "t": 9954.492759615, "pid": 21907, "src": "ws", "recv": 9954.510149395, "lt": 9954.493354133, "tt": 17.3918}
+{"stage": "user_stopped", "t": 9954.492770023, "pid": 21907, "src": "ws", "recv": 9954.510164876, "lt": 9954.493364541, "tt": 17.3918}
+{"stage": "llm_first_token", "t": 9955.017223623, "pid": 21907, "src": "ws", "recv": 9955.017880234, "lt": 9955.017818141, "tt": 17.9163}
+{"stage": "tts_request", "t": 9955.074982406, "pid": 21907, "src": "ws", "recv": 9955.084127184, "lt": 9955.075576924, "tt": 17.974}
+{"stage": "tts_first_audio", "t": 9955.291589369, "pid": 21907, "src": "ws", "recv": 9955.293741054, "lt": 9955.292183887, "tt": 18.1906}
+{"stage": "audio_out", "t": 9955.296913444, "pid": 21907, "src": "ws", "recv": 9955.300242296, "lt": 9955.297507962001, "tt": 18.196}
+{"stage": "audio_out", "t": 9955.296945758, "pid": 21907, "src": "ws", "recv": 9955.300261222, "lt": 9955.297540276, "tt": 18.196}
+{"stage": "bot_stopped", "t": 9961.179522273, "pid": 21907, "src": "ws", "recv": 9961.181178162, "lt": 9961.180116791, "tt": 24.0786}
+{"stage": "bot_stopped", "t": 9961.179554829, "pid": 21907, "src": "ws", "recv": 9961.181277514, "lt": 9961.180149347, "tt": 24.0786}
+{"stage": "llm_request", "t": 9961.181318681, "pid": 21907, "messages": 77, "chars": 5787, "est_tokens": 1447, "src": "ws", "recv": 9961.182486977, "lt": 9961.181913199, "tt": 24.0804}

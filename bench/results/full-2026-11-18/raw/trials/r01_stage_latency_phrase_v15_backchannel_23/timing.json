@@ -1,0 +1,83 @@
+{
+  "trial": "r01_stage_latency_phrase_v15_backchannel_23",
+  "group": "stage_latency",
+  "clip": "phrase_v15_backchannel_23",
+  "variant": "main",
+  "expected": "answer the phrase",
+  "duration": 13.312,
+  "events": [
+    {
+      "name": "first",
+      "t": 0.0,
+      "len": 1.912
+    }
+  ],
+  "live_bot_starts": [
+    5.12
+  ],
+  "live_bot_ends": [
+    12.96
+  ],
+  "rig": {
+    "rig": "direct",
+    "her_out_sr": 16000,
+    "clears": 1
+  },
+  "clip_meta": {
+    "text": "Summarize data privacy clearly.",
+    "source": "v15_backchannel_23"
+  },
+  "mono": [
+    9385.345206795,
+    9398.640176641
+  ],
+  "bot_segments": [
+    [
+      5.09,
+      12.99
+    ]
+  ],
+  "play_first": [
+    0.0,
+    1.912
+  ],
+  "tor": 1,
+  "first_start": 5.09,
+  "spoke_s": 4.821999999999999,
+  "user_end": 1.662,
+  "latency": 3.428,
+  "actual": "replied 3.43 s after speech end",
+  "verdict": "✓ 3.43 s",
+  "ok": true,
+  "marks": 27,
+  "final": {
+    "stages": {
+      "e2e_heard": 3.428,
+      "e2e": 2.6918,
+      "e2e_source": "marks",
+      "asr_final": 0.9026,
+      "llm_ttft": 1.1764,
+      "tts_ttfb": 0.5348,
+      "endpointing": 0.6793,
+      "found": [
+        "vad_end",
+        "asr_final",
+        "llm_request",
+        "llm_first_token",
+        "tts_request",
+        "tts_first_audio",
+        "audio_out"
+      ],
+      "transcript": "summarize data privacy clearly.",
+      "wer": {
+        "ref_words": 4,
+        "edits": 0,
+        "wer": 0.0
+      },
+      "context_tokens": 183,
+      "context_source": "estimate",
+      "context_messages": 11
+    }
+  },
+  "scored_at": "2026-11-18T18:40:29+08:00"
+}
