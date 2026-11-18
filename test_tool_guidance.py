@@ -155,6 +155,67 @@ def test_guard_and_clock_agree() -> bool:
     return ok
 
 
+# ---------------------------------------------------------------------------
+# 6. A bare repo name is qualified before it reaches the server
+# ---------------------------------------------------------------------------
+def test_github_name_is_qualified() -> bool:
+    """The delete bug: a bare name 404s, and 404 reads as "already deleted".
+
+    github_repo takes a bare name to create but owner/repo to get, fork and
+    delete. The model sent a bare name for all four. The server pastes `name`
+    into /repos/{name}, GitHub answers 404, and the agent reported the
+    repositories as already removed while its own list showed them present.
+    """
+    print("\n6. a bare repository name is qualified for get/fork/delete")
+    from mcp_bridge import _shape_github_args as shape
+
+    owner = config.OWNER_GITHUB
+    ok = check("delete of a bare name is qualified",
+               shape({"action": "delete", "name": "jeolee"})["name"]
+               == f"{owner}/jeolee")
+    ok &= check("get of a bare name is qualified",
+                shape({"action": "get", "name": "jeolee"})["name"]
+                == f"{owner}/jeolee")
+    ok &= check("fork of a bare name is qualified",
+                shape({"action": "fork", "name": "jeolee"})["name"]
+                == f"{owner}/jeolee")
+    # create MUST stay bare: a slash would be a malformed repository name.
+    ok &= check("create is left bare",
+                shape({"action": "create", "name": "jeolee"})["name"] == "jeolee")
+    ok &= check("an already-qualified name is untouched",
+                shape({"action": "delete", "name": f"{owner}/jeolee"})["name"]
+                == f"{owner}/jeolee")
+    ok &= check("a foreign owner is respected",
+                shape({"action": "delete", "name": "someone/their-repo"})["name"]
+                == "someone/their-repo")
+    ok &= check("an org call is left alone",
+                shape({"action": "delete", "name": "r", "org": "anorg"})["name"]
+                == "r")
+    ok &= check("list is untouched", shape({"action": "list"}) == {"action": "list"})
+    ok &= check("surrounding spaces are trimmed",
+                shape({"action": "delete", "name": "  jeolee  "})["name"]
+                == f"{owner}/jeolee")
+    ok &= check("a missing name is not invented",
+                "name" not in shape({"action": "delete"}))
+    ok &= check("an empty name is not invented",
+                shape({"action": "delete", "name": ""})["name"] == "")
+    return ok
+
+
+def test_github_404_guidance() -> bool:
+    print("\n7. the prompt stops reading a 404 as 'already deleted'")
+    p = config.TOOLS_SYSTEM_PROMPT
+    ok = check("it says name is owner/repo for get/fork/delete",
+               "must be owner/repo" in p)
+    ok &= check("it names the owner", config.OWNER_GITHUB in p)
+    ok &= check("it warns that a 404 is usually a bad name",
+                "is almost always a malformed name" in p)
+    ok &= check("it forbids 'already removed' on a 404 alone",
+                "never tell the person a" in p
+                and "has already been removed on the strength of a 404" in p)
+    return ok
+
+
 def main() -> int:
     results = [
         test_github_instruction(),
@@ -162,6 +223,8 @@ def main() -> int:
         test_clock_unambiguous(),
         test_stale_clock_is_replaced(),
         test_guard_and_clock_agree(),
+        test_github_name_is_qualified(),
+        test_github_404_guidance(),
     ]
     print("\n--- summary ---")
     print(f"  {sum(results)}/{len(results)} groups passed")

@@ -357,6 +357,54 @@ def _shape_search_args(args: dict) -> dict:
     return shaped
 
 
+def _shape_github_args(args: dict) -> dict:
+    """Qualify a bare repository name as ``owner/repo`` for the actions that
+    need one.
+
+    ``github_repo`` is one tool with two naming conventions, and its
+    description says so in a parenthetical: ``name`` is "Repository name" for
+    ``create`` and "``owner/repo``" for ``get``/``fork``/``delete``. The model
+    reads the first line -- "Repository name" -- and sends a bare name, which
+    the server pastes straight into ``/repos/{name}``. GitHub then answers 404,
+    the same status it uses for a repository that really is gone, so the
+    failure is indistinguishable from "already deleted".
+
+    Measured on the real account, 18 Nov 2026, against a repo created seconds
+    earlier::
+
+        create name="wandog-probe2"              -> 201 raesoriano/wandog-probe2
+        delete name="wandog-probe2"              -> 404 Not Found
+        delete name="raesoriano/wandog-probe2"   -> 204 deleted
+
+    The live event log shows the same shape: 13 of 13 delete calls sent a bare
+    name, all 13 got 404, and the agent told the person the repositories "might
+    have already been removed" four times over two minutes while they sat in
+    plain sight in its own ``list`` output.
+
+    ``create`` is left alone -- it takes a bare name, and qualifying it would
+    try to create a repository with a slash in its name. An ``org`` argument is
+    left alone too: there the caller has already said which namespace it means.
+    """
+    if not isinstance(args, dict):
+        return args
+    if args.get("action") not in ("get", "fork", "delete"):
+        return args
+    name = args.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return args
+    name = name.strip()
+    if "/" in name:
+        return args                    # already owner/repo; respect it
+    if args.get("org"):
+        return args
+    owner = (config.OWNER_GITHUB or "").strip()
+    if not owner:
+        return args
+    shaped = dict(args)
+    shaped["name"] = f"{owner}/{name}"
+    return shaped
+
+
 def _tavily_news_key() -> Optional[str]:
     """The Tavily API key, read through config's secret store.
 
@@ -1293,6 +1341,12 @@ class ToolBridgeProcessor(FrameProcessor):
             if name == "search":
                 call_args = _shape_search_args(call_args)
                 news_wanted = call_args.pop("_news_wanted", None)
+            # Same idea as the search shaping above, for the other tool whose
+            # arguments the model gets half right. github_repo takes a bare
+            # name to create and owner/repo to get, fork or delete; the model
+            # sends a bare name for all four, and every delete then 404s.
+            if name == "github_repo":
+                call_args = _shape_github_args(call_args)
             try:
                 # One deadline for the whole call, retries included. Wrapping
                 # only the individual attempt would let a 3-attempt search hold

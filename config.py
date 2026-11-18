@@ -590,6 +590,22 @@ TOOLS_SYSTEM_PROMPT = (
     "person to confirm. A read needs no confirmation; a write always does. "
     "If GitHub refuses because the token is missing or lacks a scope, say "
     "exactly that; do not describe a missing permission as not having access. "
+    # The name shape. github_repo takes a BARE name to create but owner/repo
+    # to get, fork and delete, and the model sent a bare name for all four.
+    # The server pastes `name` into /repos/{name}, so a bare name 404s -- and
+    # 404 is the same answer GitHub gives for a repository that is really
+    # gone. On 18 Nov 2026 that produced 13 failed deletes in a row while the
+    # repositories sat in plain sight in the model's own `list` output, and
+    # the person was told four times that they "might have already been
+    # removed". mcp_bridge._shape_github_args now qualifies the name, so the
+    # call works whether or not the model remembers; this line is what makes
+    # the model's own reasoning and its report to the person correct.
+    "In `github_repo`, `name` is a bare name only for create; for get, fork "
+    "and delete it must be owner/repo -- for you that means "
+    f"{OWNER_GITHUB}/<name>. A 404 on a repository your own list just showed "
+    "is almost always a malformed name, not a deleted repository: check the "
+    "name before you conclude it is gone, and never tell the person a "
+    "repository has already been removed on the strength of a 404 alone. "
     # Long tasks. `bash` is a FOREGROUND call with a wall clock on it, and the
     # voice loop is suspended while it runs -- a measured 60s `sleep` held the
     # tool call for the full 60s. `serve` is the detached alternative: it

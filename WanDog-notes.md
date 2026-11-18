@@ -1243,3 +1243,77 @@ Also re-ran `test_tool_parity` (14 tools), `test_tool_secrets` and
 `test_tool_secrets_live` (GITHUB_TOKEN reaches both spawned servers),
 `test_eventbus`, `test_turn_context`, `test_turn_live`, and
 `test_endtoend_answer`, which spoke a live reply with the new clock line.
+
+## 18. A repository the agent could create but not delete
+
+Reported: "the agent was able to create the repositories, see them, and list
+them but is unable to delete the newly created ones."
+
+Not a permissions problem and not a token problem. The token has `admin` on
+every repo in the account (`permissions` in the `list` payload says so), and a
+delete with the right name returns 204. The name is what was wrong.
+
+### The shape of the argument
+
+`github_repo` is one tool with two naming conventions, and its own description
+states both -- in a parenthetical that the model reads as one blob:
+
+    - name : Repository name — required for get/fork/delete (owner/repo)
+
+`create` takes a **bare** name (`POST /user/repos` with `{"name": ...}`), and
+`get`/`fork`/`delete` take **owner/repo**, because the server pastes the value
+straight into the path: `DELETE /repos/{name}`. Send a bare name to that path
+and GitHub answers **404**, which is the same status it returns for a
+repository that really is gone. So the failure is indistinguishable from
+success-adjacent state: the agent concluded the repos had already been deleted.
+
+Reproduced on the real account, 18 Nov 2026, against a repo created seconds
+earlier:
+
+    create name="wandog-probe2"              -> 201 raesoriano/wandog-probe2
+    delete name="wandog-probe2"              -> 404 Not Found
+    delete name="raesoriano/wandog-probe2"   -> 204 deleted
+
+### What the live log shows
+
+From `/tmp/wandog_events.jsonl`, the whole session:
+
+| | count |
+|---|---|
+| `github_repo` calls | 20 |
+| deletes sent with a bare name | 13 of 13 |
+| 404s returned | 13 of 13 |
+| times the person was told the repos "might have already been removed" | 4 |
+
+The four repositories were present the entire time, and the agent's own `list`
+call showed them with both `name` (bare) and `full_name` (qualified). It kept
+reaching for `name`.
+
+### The fix
+
+Two layers, same shape as the clock and search fixes in §17 -- a deterministic
+one that works whether or not the model remembers, and a prompt line that
+makes the model's reasoning and its report to the person correct.
+
+1. `mcp_bridge._shape_github_args` qualifies a bare name for
+   `get`/`fork`/`delete` before the call reaches the server, using
+   `config.OWNER_GITHUB`. It leaves `create` alone (a slash would be a
+   malformed repository name), leaves an already-qualified name alone, and
+   leaves an `org` call alone.
+2. `config.TOOLS_SYSTEM_PROMPT` says `name` is bare only for create, gives the
+   owner to prefix, and forbids reporting a repository as already removed on
+   the strength of a 404 alone.
+
+Verified end-to-end through the real MCP server with the exact arguments the
+live log recorded: `delete name="wandog-e2e-probe"` -- shaped to
+`raesoriano/wandog-e2e-probe` -- now returns `{"status": "deleted"}`.
+
+Note what the fix does *not* claim. Replaying the logged conversation against
+the live model in a clean context, it qualifies the name by itself in 6 of 6
+trials, with or without the new prompt line. The 13 bare names came out of a
+long, noisy session where the model had a successful bare-name `create` and a
+`list` full of bare `name` fields in front of it. That is precisely the case a
+prompt rule cannot be relied on to win, and the reason the shim exists.
+
+`test_tool_guidance.py` grew two groups (7/7 now): the shaping table, including
+the cases it must not touch, and the 404 wording.
