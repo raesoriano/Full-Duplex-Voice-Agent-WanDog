@@ -322,14 +322,20 @@ def test_cap_costs_sources() -> bool:
 
 
 def test_default_is_large_enough() -> bool:
-    """The default must clear every payload shape the tools have returned.
+    """The default must leave a payload usable, not merely cut it.
 
-    Measured on 17 Nov 2026, the largest payload any tool returned was a
-    22,970-char web search. A cap under that is a cap that decides the answer.
+    The old form of this test asserted CAP >= 20000, on the reasoning that a
+    cap under the largest observed payload (22,970 chars) is a cap that decides
+    the answer. That reasoning was sound only while _CAP_CLIP_LADDER had a
+    single rung at 700: a result one char over the cap fell all the way to 701
+    chars, so anything under the largest payload really was destroyed. With the
+    4000/3000/2000 rungs the cap degrades instead of collapsing, and what
+    matters is no longer "does every payload fit whole" but "does an oversized
+    one keep enough to answer from".
     """
-    print("\n[8] the default clears every observed payload")
-    ok = check(f"MCP_MODEL_RESULT_CHARS = {CAP}", CAP >= 20000,
-               "must clear the largest observed payload (22,970 chars)")
+    print("\\n[8] the default leaves an oversized payload usable")
+    ok = check(f"MCP_MODEL_RESULT_CHARS = {CAP}", CAP >= 8000,
+               "must clear the 6,280-char largest result in the event log")
     # A payload just over the default is still cut, and still says so: the cap
     # did not become decorative.
     raw = json.dumps([{"title": "T", "url": "https://e.com/1",
@@ -338,6 +344,14 @@ def test_default_is_large_enough() -> bool:
     out = mcp_bridge._cap_for_model(raw, CAP)
     ok &= check(f"a {len(raw)}-char result is still cut to {len(out)}",
                 len(out) <= CAP and out != raw)
+    # The point of the ladder: an oversized record keeps thousands of chars of
+    # prose, not hundreds. Before the rungs this was 700 for any size.
+    kept = len(json.loads(out)["results"][0]["content"])
+    ok &= check(f"the oversized record still keeps {kept} chars of prose",
+                kept >= 2000, "the ladder must not fall to the 700 rung")
+    ok &= check("the record's url and date survived",
+                bool(json.loads(out)["results"][0]["url"]
+                     and json.loads(out)["results"][0]["date"]))
     return ok
 
 

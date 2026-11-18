@@ -30,6 +30,34 @@ font = "sans serif"
 [server]
 headless = true
 
+# Polling, not inotify. This is not a preference -- inotify is broken here.
+#
+# The dashboard runs from a checkout that contains a .venv (3,921 directories)
+# and a .git (256). Streamlit's event watcher schedules ONE recursive watch on
+# the script folder, so all 4,397 directories get registered. When the kernel
+# queue (16,384 events) overflows, watchdog 7.1.0 rebuilds every watch by
+# os.walk-ing the tree again -- and that re-walk is itself what refills the
+# queue. The handler feeds the next overflow. Measured on this machine:
+#
+#   handler as shipped : 17 overflows in 6 s, 0 filesystem events delivered
+#   handler disabled   :  1 overflow  in 6 s   (so the loop is the handler)
+#   CPU, auto          : 101% of one core, continuously
+#   CPU, poll          :   0%
+#
+# The practical damage is that change detection silently stops: `auto` missed a
+# real edit to dashboard.py during measurement, while `poll` saw it. The stderr
+# spam is only the visible part.
+#
+# server.folderWatchBlacklist does NOT fix this, and was measured: 14 overflows
+# with no blacklist, 16 with .venv and .git listed, 17 with globs. It filters
+# module paths only (local_sources_watcher.py:295), never the recursive
+# schedule (event_based_path_watcher.py:228).
+#
+# "poll" rather than "none" keeps hot reload working; the only cost is that a
+# save can take up to the 0.2 s polling period to be noticed. Revisit if this
+# checkout ever stops carrying a venv next to the app.
+fileWatcherType = "poll"
+
 
 [browser]
 gatherUsageStats = false

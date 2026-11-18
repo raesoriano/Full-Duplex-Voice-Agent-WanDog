@@ -68,16 +68,16 @@ def test_github_instruction() -> bool:
     print("\n1. the prompt tells the model it has GitHub access")
     p = config.TOOLS_SYSTEM_PROMPT
     ok = check("it names the github_repo tool", "github_repo" in p)
-    ok &= check("it says the token is configured", "token is configured" in p)
+    ok &= check("it says the token is set", "GITHUB_TOKEN" in p)
     ok &= check("it forbids claiming no access without checking",
-                "Never claim you cannot reach GitHub" in p)
+                "Never say you cannot reach GitHub" in p)
     ok &= check("it forbids claiming access without checking",
-                "never claim you can, without checking first" in p)
-    ok &= check("it requires a read to confirm", "action list" in p)
+                "or that you can, without calling first" in p)
+    ok &= check("it requires a read to confirm", "read is its own" in p)
     ok &= check("it requires confirmation before a write",
-                "wait for the person to confirm" in p)
+                "wait for a yes" in p)
     ok &= check("it separates a missing scope from no access",
-                "do not describe a missing permission as not having access" in p)
+                "not 'no access'" in p)
     return ok
 
 
@@ -151,8 +151,19 @@ def test_guard_and_clock_agree() -> bool:
     print("\n5. the guard, the clock and the timezone hint agree")
     ok = check("the guard forbids invented times",
                "Never state a clock time you have not been given" in config.CLOCK_GUARD)
-    ok &= check("the guard is in the tools prompt",
-                config.CLOCK_GUARD in config.TOOLS_SYSTEM_PROMPT)
+    # The guard is prepended by agent.py for bridge-on and bridge-off builds
+    # alike, so it must NOT be repeated inside the tools block. It used to be,
+    # and the assembled prompt carried the same sentence twice for a 69-char
+    # waste on every call -- the old test asserted that duplication instead of
+    # the property that matters.
+    ok &= check("the tools prompt does not repeat the guard",
+                config.CLOCK_GUARD not in config.TOOLS_SYSTEM_PROMPT)
+    assembled = (config.SYSTEM_PROMPT + " " + config.OWNER_PROMPT + " "
+                 + config.clock_line() + " " + config.CLOCK_GUARD + " "
+                 + config.TOOLS_SYSTEM_PROMPT)
+    ok &= check("the assembled prompt carries it exactly once",
+                assembled.count(config.CLOCK_GUARD) == 1,
+                f"found {assembled.count(config.CLOCK_GUARD)}")
     ok &= check("the timezone recipe uses date", "TZ=" in config.TOOLS_SYSTEM_PROMPT)
     ok &= check("the clock satisfies the guard (it is 'given')",
                 "The current date and time here is" in config.clock_line())
@@ -210,13 +221,13 @@ def test_github_404_guidance() -> bool:
     print("\n7. the prompt stops reading a 404 as 'already deleted'")
     p = config.TOOLS_SYSTEM_PROMPT
     ok = check("it says name is owner/repo for get/fork/delete",
-               "must be owner/repo" in p)
+               "must be " in p and "/<name>" in p)
     ok &= check("it names the owner", config.OWNER_GITHUB in p)
     ok &= check("it warns that a 404 is usually a bad name",
                 "is almost always a malformed name" in p)
     ok &= check("it forbids 'already removed' on a 404 alone",
-                "never tell the person a" in p
-                and "has already been removed on the strength of a 404" in p)
+                "never say one has been removed" in p
+                and "on the strength of a 404" in p)
     return ok
 
 
